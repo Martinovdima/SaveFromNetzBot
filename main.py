@@ -3,7 +3,7 @@ import os
 import asyncio
 from datetime import datetime
 import re
-
+from dotenv import load_dotenv
 
 import emoji
 
@@ -18,14 +18,15 @@ from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INSTAGRAM_REGEX, INFO_MESSAGE
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
 from insta import get_insta_video_info, get_format_inst_video, main_kb_inst, download_inst_video
 
-sys.stdout.reconfigure(encoding='utf-8')
 
-TOKEN = '8028544573:AAG_p4ICoRHRCQwz-TAIOCZV9Z-AuO7aUxM'
+sys.stdout.reconfigure(encoding='utf-8')
+load_dotenv()
+
 
 DOWNLOAD_DIR = "videos"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-bot = Bot(TOKEN)
+bot = Bot(os.getenv('TOKEN'))
 dp = Dispatcher()
 
 
