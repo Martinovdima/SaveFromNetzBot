@@ -19,14 +19,14 @@ def get_tiktok_video_info(url):
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)  # Только получаем данные, без скачивания
 
-
+    video_id = info.get("id", "Неизвестно")
     # 3. Получаем имя автора
     author = info.get("uploader", "Неизвестно")
 
     # 4. Получаем обложку видео (URL картинки)
     thumbnail_url = info.get("thumbnail", "Неизвестно")
 
-    return info, author, thumbnail_url
+    return info, author, thumbnail_url, video_id
 
 def main_kb_tt(formats):
     button_list = []
@@ -45,10 +45,11 @@ def download_tiktok_video(db: Session, user_id: int, format_id):
 
     url = user.url
     title = user.title
+    video_id = user.video_id
 
     ydl_opts = {
         'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{title}.%(ext)s'),  # Формат имени файла
+        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{title}{video_id}.%(ext)s'),  # Формат имени файла
         'merge_output_format': 'mp4',  # Принудительное объединение в MP4
         'quiet': False,  # Выводит процесс загрузки
         'noplaylist': True,  # Загружает только одно видео
@@ -57,7 +58,7 @@ def download_tiktok_video(db: Session, user_id: int, format_id):
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)  # Загружаем видео
-            file_path = os.path.join(DOWNLOAD_DIR, f"{title}.mp4")
+            file_path = os.path.join(DOWNLOAD_DIR, f"{title}{video_id}.mp4")
             return file_path, info if os.path.exists(file_path) else None
     except Exception as e:
         print(f"Ошибка при скачивании: {e}")

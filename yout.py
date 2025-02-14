@@ -42,10 +42,11 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
 
     url = user.url
     title = user.title
+    video_id = user.video_id
     # Настройки для скачивания видео и аудио
     ydl_opts = {
         'format': f"{format_id}+bestaudio/best",  # Скачивание видео и аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}-%(resolution)s.%(ext)s"),  # Имя файлов
+        'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}-%(resolution)s{video_id}.%(ext)s"),  # Имя файлов
         'ffmpeg_location': ffmpeg_path,
         'socket_timeout': 60,
         'retries': 5,
@@ -84,7 +85,7 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
         "filesize": format_info.get("filesize", "Нет данных"),
     }
 
-    output_file = os.path.join(DOWNLOAD_DIR, f"{title}-{resolution}.{ext}")
+    output_file = os.path.join(DOWNLOAD_DIR, f"{title}-{resolution}{video_id}.{ext}")
     # Проверяем, что файл существует
     file_abs = os.path.abspath(output_file)
     #
@@ -101,6 +102,9 @@ def get_video_info(url):
     }
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+
+        # id видео
+        video_id = info.get("id", "Неизвестно")
 
         # Название видео
         title = info.get('title', 'Без названия')
@@ -119,7 +123,7 @@ def get_video_info(url):
         if audio_formats:
             best_audio = max(audio_formats, key=lambda f: f['filesize'])
 
-        return best_audio['format_id'], best_audio['filesize'], title, thumbnail, info
+        return best_audio['format_id'], best_audio['filesize'], title, thumbnail, info, video_id
 
 def filter_formats_by_vcodec_and_size(audio, formats, vcodec_prefix="avc1"):
     """

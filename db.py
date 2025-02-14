@@ -12,8 +12,11 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, unique=True, index=True)  # Telegram user_id
+    video_id = Column(Integer, unique=True, index=True) # id видео из источника
     url = Column(String, nullable=True)  # Последняя отправленная ссылка
     title = Column(String, nullable=True) # Последнее название файла
+    resolutions = Column(String, nullable=True)  # Расширение
+    telegram_id = Column(Integer, unique=True, index=True, nullable=True)  # id видео из источника
 
 # Создаем таблицы
 Base.metadata.create_all(bind=engine)
@@ -31,13 +34,19 @@ def get_user(db, user_id):
     return db.query(User).filter(User.user_id == user_id).first()
 
 # Создать нового пользователя или обновить URL
-def update_or_create_user(db, user_id, url, title):
+def update_or_create_user(db, user_id, url, video_id, title):
     user = get_user(db, user_id)
     if user:
-        user.url = url  # Обновляем URL
+        user.url = url
         user.title = title
+        user.video_id = video_id
     else:
-        user = User(user_id=user_id, url=url, title=title)  # Создаем нового пользователя
+        user = User(user_id=user_id, url=url, video_id=video_id, title=title)  # Создаем нового пользователя
         db.add(user)
+    db.commit()
+
+def create_user_request(db, user_id, url, video_id, title):
+    user_request = User(user_id=user_id, url=url, video_id=video_id, title=title)
+    db.add(user_request)  # Добавляем новую запись в БД
     db.commit()
 

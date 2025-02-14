@@ -12,11 +12,15 @@ def get_insta_video_info(url):
         'quiet': True,  # Отключает лишние логи
         'noplaylist': True,  # Загружает только одно видео
         'extract_flat': False,  # Позволяет получить детали о видео
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            }
     }
 
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)  # Только получаем данные, без скачивания
-
+    # 2. Получаем ID
+    video_id = info.get("id", "Неизвестно")
 
     # 3. Получаем имя автора
     author = info.get("uploader", "Неизвестно")
@@ -24,7 +28,7 @@ def get_insta_video_info(url):
     # 4. Получаем обложку видео (URL картинки)
     thumbnail_url = info.get("thumbnail", "Неизвестно")
 
-    return info, author, thumbnail_url
+    return info, video_id, author, thumbnail_url
 
 def get_format_inst_video(video_info):
     formats = video_info.get("formats", [])
@@ -93,10 +97,11 @@ def download_inst_video(db: Session, user_id: int, format_id):
 
     url = user.url
     title = user.title
+    video_id = user.video_id
 
     ydl_opts = {
         'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{title}.%(ext)s'),  # Формат имени файла
+        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{title}{video_id}.%(ext)s'),  # Формат имени файла
         'merge_output_format': 'mp4',  # Принудительное объединение в MP4
         'quiet': False,  # Выводит процесс загрузки
         'noplaylist': True,  # Загружает только одно видео
@@ -106,7 +111,7 @@ def download_inst_video(db: Session, user_id: int, format_id):
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)  # Загружаем видео
             ext = info.get('ext', 'mp4')  # Если не найдено расширение, по умолчанию 'mkv'
-            file_path = os.path.join(DOWNLOAD_DIR, f"{title}.{ext}")
+            file_path = os.path.join(DOWNLOAD_DIR, f"{title}{video_id}.{ext}")
             return file_path, info if os.path.exists(file_path) else None
     except Exception as e:
         print(f"Ошибка при скачивании: {e}")
