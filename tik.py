@@ -49,7 +49,7 @@ def download_tiktok_video(db: Session, user_id: int, format_id):
 
     ydl_opts = {
         'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{title}{video_id}.%(ext)s'),  # Формат имени файла
+        'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}_%(resolution)s{video_id}.%(ext)s"),  # Формат имени файла
         'merge_output_format': 'mp4',  # Принудительное объединение в MP4
         'quiet': False,  # Выводит процесс загрузки
         'noplaylist': True,  # Загружает только одно видео
@@ -58,7 +58,9 @@ def download_tiktok_video(db: Session, user_id: int, format_id):
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)  # Загружаем видео
-            file_path = os.path.join(DOWNLOAD_DIR, f"{title}{video_id}.mp4")
+            resolution = info.get('resolution', 'unknow')
+            ext = info.get('ext', 'mp4')  # Если не найдено расширение, по умолчанию 'mkv'
+            file_path = os.path.join(DOWNLOAD_DIR, f"{title}_{resolution}{video_id}.{ext}")
             return file_path, info if os.path.exists(file_path) else None
     except Exception as e:
         print(f"Ошибка при скачивании: {e}")

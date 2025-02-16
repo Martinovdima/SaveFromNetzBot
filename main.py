@@ -15,7 +15,7 @@ from aiogram.filters import Command
 from db import get_db, update_or_create_user, create_user_request
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
-from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INSTAGRAM_REGEX, INFO_MESSAGE
+from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INSTAGRAM_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
 from insta import get_insta_video_info, get_format_inst_video, main_kb_inst, download_inst_video
 
@@ -146,50 +146,51 @@ async def tiktok_handler(message: types.Message):
         if 'msg_info' in locals():
             await msg_info.delete()
 
-# @dp.message(lambda message: re.search(INSTAGRAM_REGEX, message.text, re.IGNORECASE))
-# async def instagram_handler(message: types.Message):
-#     # Извлекаем данные из сообщения
-#     url = message.text.strip()
-#     user_id = message.from_user.id
-#
-#     try:
-#         # Отправляем сообщение о получении информации
-#         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
-#         video_inst_info, video_id, author, thumbnail_url = get_insta_video_info(url)  # Распаковываем данные
-#
-#         # Убираем все конфликты в названии файла
-#         title_sanitaze = sanitize_filename(video_inst_info['title'])
-#
-#         format_inst_video = get_format_inst_video(video_inst_info)
-#
-#         # Сохраняем URL в базе данных
-#         db = next(get_db())
-#         update_or_create_user(db, user_id, url, video_id, title_sanitaze)
-#
-#         # Отправляем информацию о видео и клавиатуру
-#         msg_keyboard = await message.reply_photo(
-#             thumbnail_url,
-#             caption=f"Видео: {title_sanitaze}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-#             reply_markup=main_kb_inst(format_inst_video)
-#         )
-#         # Сохраняем ID сообщения для пользователя
-#         user_messages[user_id] = msg_keyboard.message_id
-#         # Удаляем сообщения о получении информации
-#         await msg_info.delete()
-#
-#     except Exception as e:
-#         print(f"Произошла ошибка: {e}")
-#         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
-#         # Удаляем сообщения о получении информации
-#         await msg_info.delete()
-#
-#         # Проверяем форматы
-#         # for f in info.get('formats', []):  # Добавил .get(), чтобы избежать ошибки, если 'formats' нет
-#         #     print(f"{f['format_id']} - {f['ext']} - {f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')} - "
-#         #         f"{f.get('resolution', 'Неизвестно')} - {f.get('filesize', 'Неизвестно')} - {f.get('filesize_approx', 'Неизвестно')}")
-#
-#         # await message.answer_photo(photo=FAILS_IMAGE,
-#         #                            caption="Мы работает над этой опцией...")
+@dp.message(lambda message: re.search(VK_VIDEO_REGEX, message.text, re.IGNORECASE))
+async def vk_video_handler(message: types.Message):
+    url = message.text.strip()
+    user_id = message.from_user.id
+
+    logging.debug(f"Message received from user {user_id}: {url}")
+
+    try:
+        # Отправляем сообщение о получении информации
+        msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
+        video_inst_info, author, thumbnail_url, video_id, duration = get_insta_video_info(url)  # Распаковываем данные
+        print(video_inst_info)
+
+        # Убираем все конфликты в названии файла
+        title_sanitaze = sanitize_filename(video_inst_info['title'])
+        format_inst_video = get_format_inst_video(video_inst_info)
+        logging.info(f"Video ID: {video_id}, Autor: {author}, Title: {title_sanitaze}")
+
+        # Сохраняем URL в базе данных
+        db = next(get_db())
+        update_or_create_user(db, user_id, url, video_id, title_sanitaze)
+        logging.info(f"Data saved to the database for user {user_id}")
+
+
+        msg_keyboard = await message.reply_photo(
+            thumbnail_url,
+            caption=f"Видео: {title_sanitaze}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
+            reply_markup=main_kb_inst(format_inst_video, duration)
+        )
+
+        # Сохраняем ID сообщения для пользователя
+        user_messages[user_id] = msg_keyboard.message_id
+        logging.debug(f"Message with keyboard sent to user {user_id}")
+
+        # Удаляем сообщение о получении информации
+        await msg_info.delete()
+
+    except Exception as e:
+        logging.error(f"Error processing TikTok link from {user_id}: {e}")
+        await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+
+        # Удаляем сообщение о получении информации (если успело отправиться)
+        if 'msg_info' in locals():
+            await msg_info.delete()
+
 
 @dp.message()  # Этот хэндлер сработает, если ни один другой не подошёл
 async def handle_invalid_message(message: types.Message):
@@ -390,76 +391,109 @@ async def download_handler(callback_query: types.CallbackQuery):
 
         await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
-# @dp.callback_query(lambda call: call.data.startswith('inst_download:') or call.data.startswith('inst_download_audio:'))
-# async def inst_download_handler(callback_query: types.CallbackQuery):
-#     format_id = callback_query.data.split(':')[1]
-#     user_id = callback_query.from_user.id
-#     db = next(get_db())
-#     try:
-#         if user_id in user_messages:
-#             try:
-#                 await bot.edit_message_caption(
-#                     chat_id=callback_query.message.chat.id,
-#                     message_id=user_messages[user_id],  # Используем ID сохраненного сообщения
-#                     caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
-#                     reply_markup=None  # Убираем клавиатуру
-#                 )
-#             except Exception as e:
-#                 print(f"Ошибка при изменении сообщения: {e}")
-#
-#         # Скачиваем и объединяем файл
-#         output_file, video_info = download_inst_video(db, user_id, format_id)
-#
-#         if callback_query.data.split(':')[0] == 'tt_download_audio:':
-#             if output_file.endswith('.webm'):
-#                 output_path = convert_webm_to_m4a(output_file)
-#                 output_file = output_path
-#
-#
-#         # Проверка размера файла
-#         file_size = os.path.getsize(output_file)
-#         if file_size > 2 * 1024 * 1024 * 1024:  # 2 GB
-#             await callback_query.message.reply(text=emoji.emojize(EMOJIS['warning']) + "К сожалению, Telegram не позволяет отправлять файлы больше 2 ГБ.", disable_web_page_preview=True)
-#             return
-#
-#
-#         # Формируем описание (caption) для видео
-#         caption = create_caption(video_info, format_id)
-#         # Отправляем аудио
-#         if callback_query.data.split(':')[0] == 'tt_download_audio:':
-#             audio_file = FSInputFile(output_file)
-#             await callback_query.message.answer_audio(
-#                 audio=audio_file,
-#                 caption=caption,
-#                 parse_mode=None,  # Обязательно для работы ссылок
-#                 supports_streaming=True  # Указывает, что видео можно смотреть в потоковом режиме
-#             )
-#         else:
-#             # Выгружаем видео в телеграмм
-#             video_file = FSInputFile(output_file)
-#             await callback_query.message.answer_video(
-#                 video=video_file,
-#                 caption=caption,
-#                 parse_mode=None,
-#                 supports_streaming=True
-#             )
-#         # После завершения скачивания удаляем старое сообщение с клавиатурой
-#         if user_id in user_messages:
-#             try:
-#                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
-#                 del user_messages[user_id]  # Удаляем ID сообщения после удаления
-#             except Exception as e:
-#                 print(f"Ошибка при удалении сообщения: {e}")
-#
-#     except Exception as e:
-#         # После завершения скачивания удаляем старое сообщение с клавиатурой
-#         if user_id in user_messages:
-#             try:
-#                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
-#                 del user_messages[user_id]  # Удаляем ID сообщения после удаления
-#             except Exception as e:
-#                 print(f"Ошибка при удалении сообщения: {e}")
-#         await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+@dp.callback_query(lambda call: call.data.startswith('inst_download:') or call.data.startswith('inst_download_audio:'))
+async def inst_download_handler(callback_query: types.CallbackQuery):
+    format_id = callback_query.data.split(':')[1]
+    file_size_id = callback_query.data.split(':')[2]
+    user_id = callback_query.from_user.id
+    db = next(get_db())
+    try:
+        if user_id in user_messages:
+            try:
+                await bot.edit_message_caption(
+                    chat_id=callback_query.message.chat.id,
+                    message_id=user_messages[user_id],  # Используем ID сохраненного сообщения
+                    caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
+                    reply_markup=None  # Убираем клавиатуру
+                )
+            except Exception as e:
+                print(f"Ошибка при изменении сообщения: {e}")
+
+        # Скачиваем и объединяем файл
+        output_file, video_info = download_inst_video(db, user_id, format_id)
+
+        if callback_query.data.split(':')[0] == 'inst_download_audio:':
+            if output_file.endswith('.webm'):
+                output_path = convert_webm_to_m4a(output_file)
+                output_file = output_path
+
+
+        # Проверка размера файла
+        file_size = os.path.getsize(output_file)
+        if file_size > 2 * 1024 * 1024 * 1024:  # 2 GB
+            await callback_query.message.reply(text=emoji.emojize(EMOJIS['warning']) + "К сожалению, Telegram не позволяет отправлять файлы больше 2 ГБ.", disable_web_page_preview=True)
+            return
+
+
+        # Формируем описание (caption) для видео
+        duration = video_info.get('duration', 0)
+        # Ищем нужный формат по format_id
+        selected_format = None
+        best_resolution = "Неизвестно"  # Объявляем переменную заранее
+
+        if "formats" in video_info:
+            for fmt in video_info["formats"]:
+                if fmt.get("vcodec") != "none" and fmt.get("format_id") == format_id:
+                    selected_format = fmt
+                    break
+
+        if selected_format:
+            width = selected_format.get("width")
+            height = selected_format.get("height")
+            best_resolution = f"{width}x{height}" if width and height else "Неизвестно"
+        # Формируем caption
+        caption_v = (
+            f"{emoji.emojize(EMOJIS['title'])} Название: {video_info.get('title', 'Неизвестно')}\n"
+            f"{emoji.emojize(EMOJIS['autor'])} Автор: {video_info.get('uploader', 'Неизвестно')}\n"
+            f'\n'
+            f"{emoji.emojize(EMOJIS['durations'])} Длительность: {int(duration // 60)} минут {int(duration % 60)} сек\n"
+            f'\n'
+            f"{emoji.emojize(EMOJIS['resolutions'])} Разрешение: {best_resolution}\n"
+            f"{emoji.emojize(EMOJIS['size'])} Размер файла: {file_size_id}\n"
+        )
+        caption_a = (
+            f"{emoji.emojize(EMOJIS['title'])} Название: {video_info.get('title', 'Неизвестно')}\n"
+            f"{emoji.emojize(EMOJIS['autor'])} Автор: {video_info.get('uploader', 'Неизвестно')}\n"
+            f'\n'
+            f"{emoji.emojize(EMOJIS['durations'])} Длительность: {int(duration // 60)} минут {int(duration % 60)} сек\n"
+            f'\n'
+            f"{emoji.emojize(EMOJIS['size'])} Размер файла: {file_size_id}\n"
+        )
+        # Отправляем аудио
+        if callback_query.data.split(':')[0] == 'inst_download_audio:' or output_file.endswith('.m4a'):
+            audio_file = FSInputFile(output_file)
+            await callback_query.message.answer_audio(
+                audio=audio_file,
+                caption=caption_a,
+                parse_mode=None,  # Обязательно для работы ссылок
+                supports_streaming=True  # Указывает, что видео можно смотреть в потоковом режиме
+            )
+        else:
+            # Выгружаем видео в телеграмм
+            video_file = FSInputFile(output_file)
+            await callback_query.message.answer_video(
+                video=video_file,
+                caption=caption_v,
+                parse_mode=None,
+                supports_streaming=True
+            )
+        # После завершения скачивания удаляем старое сообщение с клавиатурой
+        if user_id in user_messages:
+            try:
+                await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+                del user_messages[user_id]  # Удаляем ID сообщения после удаления
+            except Exception as e:
+                print(f"Ошибка при удалении сообщения: {e}")
+
+    except Exception as e:
+        # После завершения скачивания удаляем старое сообщение с клавиатурой
+        if user_id in user_messages:
+            try:
+                await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+                del user_messages[user_id]  # Удаляем ID сообщения после удаления
+            except Exception as e:
+                print(f"Ошибка при удалении сообщения: {e}")
+        await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
 
 
