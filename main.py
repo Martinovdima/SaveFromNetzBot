@@ -15,9 +15,9 @@ from aiogram.filters import Command
 from db import get_db, update_or_create_user, create_user_request
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
-from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INSTAGRAM_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX
+from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
-from insta import get_insta_video_info, get_format_inst_video, main_kb_inst, download_inst_video
+from vk import get_insta_video_info, get_format_inst_video, main_kb_inst, download_inst_video
 
 
 sys.stdout.reconfigure(encoding='utf-8')

@@ -13,8 +13,14 @@ from rest import EMOJIS, DOWNLOAD_DIR
 
 def sanitize_filename(filename):
     """
-    Удаляет недопустимые символы из имени файла и пути для совместимости с файловой системой.
-    """
+        Удаляет недопустимые символы из имени файла и пути для совместимости с файловой системой.
+
+        Args:
+            filename: Имя файла в виде строки
+
+        Returns:
+            str: Отформатированную строку.
+        """
     # Удаляем URL-адреса (http, https, www)
     text = re.sub(r"https?://\S+|www\.\S+|@\w+", "", filename)
     # Заменяем недопустимые символы на "_"
@@ -95,8 +101,14 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
 
 def get_video_info(url):
     """
-    Получает информацию о видео из yt-dlp.
-    """
+        Получает информацию о видео из yt-dlp.
+
+        Args:
+            url (str): Ссылка на видео файл
+
+        Returns:
+            str: Лучший формат аудио, Размер аудио файла, Название, Картинку, Информацию по файлу, ID Видео
+        """
     ydl_opts = {
         'noplaylist': True,  # Только одно видео
     }
@@ -164,6 +176,17 @@ def filter_formats_by_vcodec_and_size(audio, formats, vcodec_prefix="avc1"):
     return filtered_formats
 
 def main_kb(filtered_formats, audio_id, audio_size):
+    """
+           Формирует клавиатуру из списка форматов
+
+           Args:
+               filtered_formats (list): Список доступных форматов видео
+               audio_id (str): ID аудио файла
+               audio_size (str): Размер аудио файла
+
+           Returns:
+               list: Список клавиш
+           """
     button_list = []
     button_list.append([InlineKeyboardButton(
         text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {f"{round(audio_size / (1024 ** 2), 2)} MB"}", callback_data=f"download_audio:{audio_id}")])

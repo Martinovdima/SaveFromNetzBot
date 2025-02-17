@@ -36,7 +36,6 @@ ERROR_TEXT = f"Что-то пошло не так, попробуйте позж
 # Регулярные выражения для поиска ссылок
 YOUTUBE_REGEX = r"(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/\S+"
 TIKTOK_REGEX = r"(https?:\/\/)?(www\.)?(tiktok\.com)\/\S+"
-INSTAGRAM_REGEX = r"(https?:\/\/)?(www\.)?(instagram\.com|instagr\.am)\/\S+"
 VK_VIDEO_REGEX = r"(https?://)?(www\.)?(vk\.com|vkvideo\.ru)/video[-\d]+_\d+"
 
 INFO_MESSAGE = " Получаю информацию о видео..."
