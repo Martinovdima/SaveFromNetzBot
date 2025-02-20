@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 
 # Настройка базы данных
 Base = declarative_base()
@@ -21,20 +21,40 @@ class User(Base):
 # Создаем таблицы
 Base.metadata.create_all(bind=engine)
 
-# Получение сессии базы данных
+
 def get_db():
+    """
+        Инициализирует сессию базы данных.
+
+        """
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# Получить пользователя по user_id
 def get_user(db, user_id):
+    """
+        Осуществляет поиск пользователя по базе данных.
+
+        Args:
+            user_id (int): id пользователя из телеграмма
+
+        Returns:
+            int: первую строку id пользователя из базы данных.
+        """
     return db.query(User).filter(User.user_id == user_id).first()
 
-# Создать нового пользователя или обновить URL
 def update_or_create_user(db, user_id, url, video_id, title):
+    """
+        Создает или обновляет данные пользователя в базе данных.
+
+        Args:
+           user_id  (int): уникальный id пользователя из телеграмма
+           url      (str): ссылка на файл
+           video_id (str): уникальный id видео из источника
+           title    (str): название файла из источника
+        """
     user = get_user(db, user_id)
     if user:
         user.url = url
@@ -45,8 +65,4 @@ def update_or_create_user(db, user_id, url, video_id, title):
         db.add(user)
     db.commit()
 
-def create_user_request(db, user_id, url, video_id, title):
-    user_request = User(user_id=user_id, url=url, video_id=video_id, title=title)
-    db.add(user_request)  # Добавляем новую запись в БД
-    db.commit()
 
