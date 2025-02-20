@@ -16,7 +16,7 @@ def sanitize_filename(filename):
         Удаляет недопустимые символы из имени файла и пути для совместимости с файловой системой.
 
         Args:
-            filename: Имя файла в виде строки
+            filename (str): Имя файла в виде строки
 
         Returns:
             str: Отформатированную строку.
@@ -109,14 +109,21 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
 
 def get_video_info(url):
     """
-        Получает информацию о видео из yt-dlp.
+    Получает информацию о видео из YouTube с помощью yt-dlp.
 
-        Args:
-            url (str): Ссылка на видео файл
+    Args:
+        url (str): Ссылка на видео.
 
-        Returns:
-            str: Лучший формат аудио, Размер аудио файла, Название, Картинку, Информацию по файлу, ID Видео
-        """
+    Returns:
+        tuple: Кортеж из:
+            - str: Лучший формат аудио.
+            - int: Размер аудиофайла (в байтах).
+            - str: Название видео.
+            - str: Ссылка на миниатюру (обложку).
+            - dict: Полная информация о видео.
+            - str: ID видео.
+
+    """
     ydl_opts = {
         'cookiefile': "cookies.txt",
         'verbose': True,
@@ -155,14 +162,21 @@ def get_video_info(url):
 
 def filter_formats_by_vcodec_and_size(audio, formats, vcodec_prefix="avc1"):
     """
-    Фильтрует список форматов по префиксу видеокодека и наличию размера файла.
+    Фильтрует список видеоформатов по префиксу видеокодека и наличию размера файла.
 
     Args:
-        formats (list): Список форматов, полученный из yt-dlp.
-        vcodec_prefix (str): Префикс видеокодека для фильтрации (например, "avc1").
+        audio (int | float | None): Размер аудиофайла в байтах или None, если неизвестен.
+        formats (list[dict]): Список форматов, полученный из yt-dlp.
+        vcodec_prefix (str, optional): Префикс видеокодека для фильтрации (по умолчанию "avc1").
 
     Returns:
-        list: Список форматов, где видеокодек начинается с заданного префикса и указан размер файла.
+        list[dict]: Отфильтрованный список форматов с полями:
+            - format_id (str): ID формата.
+            - extension (str): Расширение файла (например, "mp4").
+            - resolution (str): Разрешение (например, "1920x1080").
+            - vcodec (str): Видеокодек.
+            - filesize (str): Общий размер (включая аудио) в мегабайтах (например, "12.5 MB").
+
     """
     filtered_formats = []
     if isinstance(audio, (int, float)):
@@ -193,16 +207,16 @@ def filter_formats_by_vcodec_and_size(audio, formats, vcodec_prefix="avc1"):
 
 def main_kb(filtered_formats, audio_id, audio_size):
     """
-           Формирует клавиатуру из списка форматов
+    Формирует клавиатуру с кнопками для скачивания аудио и видео.
 
-           Args:
-               filtered_formats (list): Список доступных форматов видео
-               audio_id (str): ID аудио файла
-               audio_size (str): Размер аудио файла
+    Args:
+        filtered_formats (list[dict]): Список словарей с форматами видео.
+        audio_id (str): ID аудиофайла.
+        audio_size (int): Размер аудиофайла в байтах.
 
-           Returns:
-               list: Список клавиш
-           """
+    Returns:
+        InlineKeyboardMarkup: Объект клавиатуры с кнопками загрузки.
+    """
     button_list = []
     button_list.append([InlineKeyboardButton(
         text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB",

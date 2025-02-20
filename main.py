@@ -17,7 +17,7 @@ from yout import sanitize_filename, download_and_merge_by_format, get_video_info
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
 from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
-from vk import get_insta_video_info, get_format_inst_video, main_kb_inst, download_inst_video
+from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -156,12 +156,11 @@ async def vk_video_handler(message: types.Message):
     try:
         # Отправляем сообщение о получении информации
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
-        video_inst_info, author, thumbnail_url, video_id, duration = get_insta_video_info(url)  # Распаковываем данные
-        print(video_inst_info)
+        video_vk_info, author, thumbnail_url, video_id, duration = get_vk_video_info(url)  # Распаковываем данные
 
         # Убираем все конфликты в названии файла
-        title_sanitaze = sanitize_filename(video_inst_info['title'])
-        format_inst_video = get_format_inst_video(video_inst_info)
+        title_sanitaze = sanitize_filename(video_vk_info['title'])
+        format_vk_video = get_formats_vk_video(video_vk_info)
         logging.info(f"Video ID: {video_id}, Autor: {author}, Title: {title_sanitaze}")
 
         # Сохраняем URL в базе данных
@@ -173,7 +172,7 @@ async def vk_video_handler(message: types.Message):
         msg_keyboard = await message.reply_photo(
             thumbnail_url,
             caption=f"Видео: {title_sanitaze}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-            reply_markup=main_kb_inst(format_inst_video, duration)
+            reply_markup=make_keyboard_vk(format_vk_video, duration)
         )
 
         # Сохраняем ID сообщения для пользователя
@@ -399,8 +398,8 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
 
         await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
-@dp.callback_query(lambda call: call.data.startswith('inst_download:') or call.data.startswith('inst_download_audio:'))
-async def inst_download_handler(callback_query: types.CallbackQuery):
+@dp.callback_query(lambda call: call.data.startswith('vk_download_video:') or call.data.startswith('vk_download_audio:'))
+async def vk_download_handler(callback_query: types.CallbackQuery):
     format_id = callback_query.data.split(':')[1]
     file_size_id = callback_query.data.split(':')[2]
     user_id = callback_query.from_user.id
@@ -418,9 +417,9 @@ async def inst_download_handler(callback_query: types.CallbackQuery):
                 print(f"Ошибка при изменении сообщения: {e}")
 
         # Скачиваем и объединяем файл
-        output_file, video_info = download_inst_video(db, user_id, format_id)
+        output_file, video_info = download_vk_video(db, user_id, format_id)
 
-        if callback_query.data.split(':')[0] == 'inst_download_audio:':
+        if callback_query.data.split(':')[0] == 'vk_download_audio:':
             if output_file.endswith('.webm'):
                 output_path = convert_webm_to_m4a(output_file)
                 output_file = output_path
@@ -468,7 +467,7 @@ async def inst_download_handler(callback_query: types.CallbackQuery):
             f"{emoji.emojize(EMOJIS['size'])} Размер файла: {file_size_id}\n"
         )
         # Отправляем аудио
-        if callback_query.data.split(':')[0] == 'inst_download_audio:' or output_file.endswith('.m4a'):
+        if callback_query.data.split(':')[0] == 'vk_download_audio:' or output_file.endswith('.m4a'):
             audio_file = FSInputFile(output_file)
             await callback_query.message.answer_audio(
                 audio=audio_file,
