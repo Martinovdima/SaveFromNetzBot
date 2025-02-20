@@ -51,13 +51,21 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
     video_id = user.video_id
     # Настройки для скачивания видео и аудио
     ydl_opts = {
+        'cookiefile': "cookies.txt",
+        'verbose': True,
         'format': f"{format_id}+bestaudio/best",  # Скачивание видео и аудио
         'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}-%(resolution)s{video_id}.%(ext)s"),  # Имя файлов
         'ffmpeg_location': ffmpeg_path,
         'socket_timeout': 60,
         'retries': 5,
         'nocheckcertificate': True,
-        'postprocessors': []  # Отключаем автоматическое объединение
+        'postprocessors': [],  # Отключаем автоматическое объединение
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'extractor_args': {
+            'youtube': {
+                'formats': 'missing_pot'
+            }
+        }
     }
 
     # Скачивание видео и аудио
@@ -110,7 +118,15 @@ def get_video_info(url):
             str: Лучший формат аудио, Размер аудио файла, Название, Картинку, Информацию по файлу, ID Видео
         """
     ydl_opts = {
+        'cookiefile': "cookies.txt",
+        'verbose': True,
         'noplaylist': True,  # Только одно видео
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'extractor_args': {
+            'youtube': {
+                'formats': 'missing_pot'
+            }
+        }
     }
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -189,12 +205,15 @@ def main_kb(filtered_formats, audio_id, audio_size):
            """
     button_list = []
     button_list.append([InlineKeyboardButton(
-        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {f"{round(audio_size / (1024 ** 2), 2)} MB"}", callback_data=f"download_audio:{audio_id}")])
+        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB",
+        callback_data=f"download_audio:{audio_id}")])
     for f in filtered_formats:
         format_id = ['format_id']
         if format_id:
             callback_data = f"download:{f['format_id']}"
-            button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}", callback_data=callback_data)])
+            button_list.append([InlineKeyboardButton(
+                text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}",
+                callback_data=callback_data)])
     # Создаем клавиатуру с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)
     return keyboard

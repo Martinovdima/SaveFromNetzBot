@@ -76,7 +76,6 @@ def get_format_inst_video(video_info):
 
     return result
 
-
 def main_kb_inst(formats, duration):
     button_list = []
     added_audio = False  # Флаг, чтобы не добавлять аудио несколько раз

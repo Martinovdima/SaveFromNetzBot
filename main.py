@@ -44,7 +44,7 @@ user_messages = {}
 
 @dp.message(Command(commands=['start']))
 async def start_handler(message: types.Message):
-    await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube или Tik Tok, и я предоставлю варианты для скачивания!")
+    await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK видео или Tik Tok, и я предоставлю варианты для скачивания!")
 
 @dp.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
 async def youtube_handler(message: types.Message):
@@ -198,93 +198,6 @@ async def handle_invalid_message(message: types.Message):
     logging.debug(f"Message received from user {user_id} ***FAILED_LINK***")
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
 
-@dp.callback_query(lambda call: call.data.startswith('tt_download:') or call.data.startswith('tt_download_audio:'))
-async def tt_download_handler(callback_query: types.CallbackQuery):
-    format_id = callback_query.data.split(':')[1]
-    user_id = callback_query.from_user.id
-    db = next(get_db())
-
-    logging.debug(f"Download request from {user_id}: format {format_id}")
-
-    try:
-        # Попытка обновить сообщение с клавиатурой
-        if user_id in user_messages:
-            try:
-                await bot.edit_message_caption(
-                    chat_id=callback_query.message.chat.id,
-                    message_id=user_messages[user_id],
-                    caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
-                    reply_markup=None
-                )
-                logging.info(f"Message updated for {user_id}")
-            except Exception as e:
-                logging.warning(f"Error updating message for {user_id}: {e}")
-
-        # Скачивание видео
-        output_file, video_info = download_tiktok_video(db, user_id, format_id)
-        logging.info(f"Video downloaded for {user_id}: {output_file}")
-
-        # Если нужно аудио, конвертируем
-        if callback_query.data.startswith('tt_download_audio:'):
-            if output_file.endswith('.webm'):
-                output_file = convert_webm_to_m4a(output_file)
-                logging.info(f"File converted to M4A for {user_id}: {output_file}")
-
-        # Проверка размера файла
-        file_size = os.path.getsize(output_file)
-        if file_size > 2 * 1024 * 1024 * 1024:  # 2 GB
-            await callback_query.message.reply(
-                text=emoji.emojize(EMOJIS['warning']) + "К сожалению, Telegram не позволяет отправлять файлы больше 2 ГБ.",
-                disable_web_page_preview=True
-            )
-            logging.warning(f"Fail too large ({file_size} byte) for {user_id}")
-            return
-
-        # Формируем описание для файла
-        caption = create_caption(video_info, format_id)
-
-        # Отправка файла пользователю
-        if callback_query.data.startswith('tt_download_audio:'):
-            audio_file = FSInputFile(output_file)
-            await callback_query.message.answer_audio(
-                audio=audio_file,
-                caption=caption,
-                parse_mode=None,
-                supports_streaming=True
-            )
-            logging.info(f"Audio sent to user {user_id}: {output_file}")
-        else:
-            video_file = FSInputFile(output_file)
-            await callback_query.message.answer_video(
-                video=video_file,
-                caption=caption,
-                parse_mode=None,
-                supports_streaming=True
-            )
-            logging.info(f"Video sent to user {user_id}: {output_file}")
-
-        # Удаление старого сообщения с клавиатурой
-        if user_id in user_messages:
-            try:
-                await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
-                del user_messages[user_id]
-                logging.info(f"Old message with keyboard deleted for {user_id}")
-            except Exception as e:
-                logging.warning(f"Error deleting message for {user_id}: {e}")
-
-    except Exception as e:
-        logging.error(f"Error downloading for {user_id}: {e}")
-
-        # Удаление старого сообщения при ошибке
-        if user_id in user_messages:
-            try:
-                await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
-                del user_messages[user_id]
-                logging.info(f"Message deleted after error for {user_id}")
-            except Exception as e:
-                logging.warning(f"Error deleting message after failure for {user_id}: {e}")
-
-        await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
 @dp.callback_query(lambda call: call.data.startswith('download:') or call.data.startswith('download_audio:'))
 async def download_handler(callback_query: types.CallbackQuery):
@@ -368,6 +281,9 @@ async def download_handler(callback_query: types.CallbackQuery):
             )
             logging.info(f"Video sent to user {user_id}: {output_file}")
 
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            logging.info(f"main.py___286___File vor {user_id}: {output_file} is delete ")
         # Удаление старого сообщения с клавиатурой
         if user_id in user_messages:
             try:
@@ -381,6 +297,98 @@ async def download_handler(callback_query: types.CallbackQuery):
         logging.error(f"Error downloading for {user_id}: {e}")
 
         # Удаление сообщения при ошибке
+        if user_id in user_messages:
+            try:
+                await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+                del user_messages[user_id]
+                logging.info(f"Message deleted after error for {user_id}")
+            except Exception as e:
+                logging.warning(f"Error deleting message after failure for {user_id}: {e}")
+
+        await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+
+@dp.callback_query(lambda call: call.data.startswith('tt_download:') or call.data.startswith('tt_download_audio:'))
+async def tt_download_handler(callback_query: types.CallbackQuery):
+    format_id = callback_query.data.split(':')[1]
+    user_id = callback_query.from_user.id
+    db = next(get_db())
+
+    logging.debug(f"Download request from {user_id}: format {format_id}")
+
+    try:
+        # Попытка обновить сообщение с клавиатурой
+        if user_id in user_messages:
+            try:
+                await bot.edit_message_caption(
+                    chat_id=callback_query.message.chat.id,
+                    message_id=user_messages[user_id],
+                    caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
+                    reply_markup=None
+                )
+                logging.info(f"Message updated for {user_id}")
+            except Exception as e:
+                logging.warning(f"Error updating message for {user_id}: {e}")
+
+        # Скачивание видео
+        output_file, video_info = download_tiktok_video(db, user_id, format_id)
+        logging.info(f"Video downloaded for {user_id}: {output_file}")
+
+        # Если нужно аудио, конвертируем
+        if callback_query.data.startswith('tt_download_audio:'):
+            if output_file.endswith('.webm'):
+                output_file = convert_webm_to_m4a(output_file)
+                logging.info(f"File converted to M4A for {user_id}: {output_file}")
+
+        # Проверка размера файла
+        file_size = os.path.getsize(output_file)
+        if file_size > 2 * 1024 * 1024 * 1024:  # 2 GB
+            await callback_query.message.reply(
+                text=emoji.emojize(EMOJIS['warning']) + "К сожалению, Telegram не позволяет отправлять файлы больше 2 ГБ.",
+                disable_web_page_preview=True
+            )
+            logging.warning(f"Fail too large ({file_size} byte) for {user_id}")
+            return
+
+        # Формируем описание для файла
+        caption = create_caption(video_info, format_id)
+
+        # Отправка файла пользователю
+        if callback_query.data.startswith('tt_download_audio:'):
+            audio_file = FSInputFile(output_file)
+            await callback_query.message.answer_audio(
+                audio=audio_file,
+                caption=caption,
+                parse_mode=None,
+                supports_streaming=True
+            )
+            logging.info(f"Audio sent to user {user_id}: {output_file}")
+        else:
+            video_file = FSInputFile(output_file)
+            await callback_query.message.answer_video(
+                video=video_file,
+                caption=caption,
+                parse_mode=None,
+                supports_streaming=True
+            )
+            logging.info(f"Video sent to user {user_id}: {output_file}")
+
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            logging.info(f"main.py___377___File vor {user_id}: {output_file} is delete ")
+
+        # Удаление старого сообщения с клавиатурой
+        if user_id in user_messages:
+            try:
+                await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+                del user_messages[user_id]
+                logging.info(f"Old message with keyboard deleted for {user_id}")
+            except Exception as e:
+                logging.warning(f"Error deleting message for {user_id}: {e}")
+
+    except Exception as e:
+        logging.error(f"Error downloading for {user_id}: {e}")
+
+        # Удаление старого сообщения при ошибке
         if user_id in user_messages:
             try:
                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
@@ -477,6 +485,11 @@ async def inst_download_handler(callback_query: types.CallbackQuery):
                 parse_mode=None,
                 supports_streaming=True
             )
+
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            logging.info(f"main.py___491___File vor {user_id}: {output_file} is delete ")
+
         # После завершения скачивания удаляем старое сообщение с клавиатурой
         if user_id in user_messages:
             try:
