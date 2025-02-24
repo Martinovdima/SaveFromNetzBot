@@ -6,18 +6,20 @@ import re
 from dotenv import load_dotenv
 import logging
 
+
 import emoji
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import FSInputFile
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 
 from db import get_db, update_or_create_user
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
 from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
-from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video
+from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video, get_format_id_from_callback, is_under_2gb
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -47,7 +49,7 @@ async def start_handler(message: types.Message):
     await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK видео или Tik Tok, и я предоставлю варианты для скачивания!")
 
 @dp.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
-async def youtube_handler(message: types.Message):
+async def youtube_handler(message: types.Message, state: FSMContext):
     url = message.text.strip()
     user_id = message.from_user.id
 
@@ -73,13 +75,16 @@ async def youtube_handler(message: types.Message):
         formats = info.get("formats", [])
 
         # Фильтруем форматы
-        filtered_formats = filter_formats_by_vcodec_and_size(audio_size, formats, "avc1")
+        FORMAT_DICT = filter_formats_by_vcodec_and_size(audio_size, formats, "avc1")
+
+        await state.update_data(format_dict=FORMAT_DICT)
+        logging.debug(f"Сохранено в state: {FORMAT_DICT}")
 
         # Отправляем информацию о видео и клавиатуру
         msg_keyboard = await message.reply_photo(
             thumbnail,
             caption=f"Видео: {title}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-            reply_markup=main_kb(filtered_formats, audio_id, audio_size)
+            reply_markup=main_kb(FORMAT_DICT, audio_id, audio_size)
         )
 
         # Сохраняем ID сообщения для пользователя
@@ -113,7 +118,7 @@ async def tiktok_handler(message: types.Message):
 
         # Получаем данные о видео
         video_info, author, thumbnail_url, video_id = get_tiktok_video_info(url)
-        format_video = get_tiktok_video_details(video_info)
+        format_id = get_tiktok_video_details(video_info)
         title_sanitaze = sanitize_filename(video_info['title'])
 
         # Логируем полученные данные
@@ -128,7 +133,7 @@ async def tiktok_handler(message: types.Message):
         msg_keyboard = await message.reply_photo(
             thumbnail_url,
             caption=f"Видео: {title_sanitaze}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-            reply_markup=main_kb_tt(format_video)
+            reply_markup=main_kb_tt(format_id)
         )
 
         # Сохраняем ID сообщения для пользователя
@@ -147,7 +152,7 @@ async def tiktok_handler(message: types.Message):
             await msg_info.delete()
 
 @dp.message(lambda message: re.search(VK_VIDEO_REGEX, message.text, re.IGNORECASE))
-async def vk_video_handler(message: types.Message):
+async def vk_video_handler(message: types.Message, state: FSMContext):
     url = message.text.strip()
     user_id = message.from_user.id
 
@@ -160,7 +165,9 @@ async def vk_video_handler(message: types.Message):
 
         # Убираем все конфликты в названии файла
         title_sanitaze = sanitize_filename(video_vk_info['title'])
-        format_vk_video = get_formats_vk_video(video_vk_info)
+        FORMAT_DICT = get_formats_vk_video(video_vk_info)
+        await state.update_data(format_dict=FORMAT_DICT)
+        logging.debug(f"Сохранено в state: {FORMAT_DICT}")
         logging.info(f"Video ID: {video_id}, Autor: {author}, Title: {title_sanitaze}")
 
         # Сохраняем URL в базе данных
@@ -172,7 +179,7 @@ async def vk_video_handler(message: types.Message):
         msg_keyboard = await message.reply_photo(
             thumbnail_url,
             caption=f"Видео: {title_sanitaze}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-            reply_markup=make_keyboard_vk(format_vk_video, duration)
+            reply_markup=make_keyboard_vk(FORMAT_DICT, duration)
         )
 
         # Сохраняем ID сообщения для пользователя
@@ -183,7 +190,7 @@ async def vk_video_handler(message: types.Message):
         await msg_info.delete()
 
     except Exception as e:
-        logging.error(f"Error processing TikTok link from {user_id}: {e}")
+        logging.error(f"Error processing VK video link from {user_id}: {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
         # Удаляем сообщение о получении информации (если успело отправиться)
@@ -198,10 +205,17 @@ async def handle_invalid_message(message: types.Message):
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
 
 
-@dp.callback_query(lambda call: call.data.startswith('download:') or call.data.startswith('download_audio:'))
-async def download_handler(callback_query: types.CallbackQuery):
-    format_id = callback_query.data.split(':')[1]
+@dp.callback_query(lambda call: call.data.startswith('yt_video:') or call.data.startswith('yt_audio:'))
+async def download_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    FORMAT_DICT = user_data.get("format_dict", {})
+
+    format_id = get_format_id_from_callback(callback_query.data, FORMAT_DICT)
     user_id = callback_query.from_user.id
+    file_size_id = callback_query.data.split(':')[2]
+    if is_under_2gb(file_size_id):
+        await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
+        return
     db = next(get_db())
 
     logging.debug(f"Download request from {user_id}: format {format_id}")
@@ -219,13 +233,23 @@ async def download_handler(callback_query: types.CallbackQuery):
                 logging.info(f"Message updated for {user_id}")
             except Exception as e:
                 logging.warning(f"Error updating message for {user_id}: {e}")
-
         # Скачивание видео
         output_file, video_info = download_and_merge_by_format(db, user_id, format_id)
-        logging.info(f"Video downloaded for {user_id}: {output_file}")
+        if output_file is None:
+            await callback_query.message.answer("Ошибка: Видео недоступно или удалено.")
+            if user_id in user_messages:
+                try:
+                    await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+                    del user_messages[user_id]
+                    logging.info(f"Old message with keyboard deleted for {user_id}")
+                except Exception as e:
+                    logging.warning(f"Error deleting message for {user_id}: {e}")
+            return
+        else:
+            logging.info(f"Video downloaded for {user_id}: {output_file}")
 
         # Проверка и конвертация аудио
-        if callback_query.data.startswith('download_audio'):
+        if callback_query.data.startswith('yt_audio'):
             if output_file.endswith('.webm'):
                 output_file = convert_webm_to_m4a(output_file)
                 logging.info(f"File converted to M4A for {user_id}: {output_file}")
@@ -261,7 +285,7 @@ async def download_handler(callback_query: types.CallbackQuery):
         )
 
         # Отправка пользователю
-        if callback_query.data.startswith('download_audio'):
+        if callback_query.data.startswith('yt_audio'):
             audio_file = FSInputFile(output_file)
             await callback_query.message.answer_audio(
                 audio=audio_file,
@@ -309,6 +333,10 @@ async def download_handler(callback_query: types.CallbackQuery):
 @dp.callback_query(lambda call: call.data.startswith('tt_download:') or call.data.startswith('tt_download_audio:'))
 async def tt_download_handler(callback_query: types.CallbackQuery):
     format_id = callback_query.data.split(':')[1]
+    file_size_id = callback_query.data.split(':')[2]
+    if is_under_2gb(file_size_id):
+        await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
+        return
     user_id = callback_query.from_user.id
     db = next(get_db())
 
@@ -398,10 +426,18 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
 
         await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
-@dp.callback_query(lambda call: call.data.startswith('vk_download_video:') or call.data.startswith('vk_download_audio:'))
-async def vk_download_handler(callback_query: types.CallbackQuery):
-    format_id = callback_query.data.split(':')[1]
+@dp.callback_query(lambda call: call.data.startswith('vk_video:') or call.data.startswith('vk_audio:'))
+async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    FORMAT_DICT = user_data.get("format_dict", {})
+    format_id = get_format_id_from_callback(callback_query.data, FORMAT_DICT)
     file_size_id = callback_query.data.split(':')[2]
+    if is_under_2gb(file_size_id):
+        await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
+        return
+    if is_under_2gb(file_size_id):
+        await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
+        return
     user_id = callback_query.from_user.id
     db = next(get_db())
     try:
@@ -419,7 +455,7 @@ async def vk_download_handler(callback_query: types.CallbackQuery):
         # Скачиваем и объединяем файл
         output_file, video_info = download_vk_video(db, user_id, format_id)
 
-        if callback_query.data.split(':')[0] == 'vk_download_audio:':
+        if callback_query.data.split(':')[0] == 'vk_audio:':
             if output_file.endswith('.webm'):
                 output_path = convert_webm_to_m4a(output_file)
                 output_file = output_path
@@ -467,7 +503,7 @@ async def vk_download_handler(callback_query: types.CallbackQuery):
             f"{emoji.emojize(EMOJIS['size'])} Размер файла: {file_size_id}\n"
         )
         # Отправляем аудио
-        if callback_query.data.split(':')[0] == 'vk_download_audio:' or output_file.endswith('.m4a'):
+        if callback_query.data.split(':')[0] == 'vk_audio:' or output_file.endswith('.m4a'):
             audio_file = FSInputFile(output_file)
             await callback_query.message.answer_audio(
                 audio=audio_file,

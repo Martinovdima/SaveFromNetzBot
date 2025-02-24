@@ -32,7 +32,7 @@ def main_kb_tt(formats):
     button_list = []
 
     for f in formats:
-        button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} {emoji.emojize(EMOJIS['size'])}  {f['size']}", callback_data=f"tt_download:{f['id']}")])
+        button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} {emoji.emojize(EMOJIS['size'])}  {f['size']}", callback_data=f"tt_download:{f['id']}: {f['size']}")])
 
     # Создаем клавиатуру с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)

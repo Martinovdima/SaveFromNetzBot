@@ -2,6 +2,7 @@ from yt_dlp import YoutubeDL
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import emoji
 import os
+import re
 
 from sqlalchemy.orm import Session
 from db import User
@@ -38,6 +39,7 @@ def get_vk_video_info(url):
 
     return info, author, thumbnail_url, video_id, duration
 
+
 def get_formats_vk_video(video_info):
     """
     Извлекает и фильтрует доступные форматы видео и аудио из информации о видео VK.
@@ -46,7 +48,7 @@ def get_formats_vk_video(video_info):
         video_info (dict): Словарь с информацией о видео, полученный из yt-dlp.
 
     Returns:
-        list[dict]: Список форматов с полями:
+        dict[int, list]: Словарь форматов с номерами от 1, где:
             - format_id (str): Уникальный идентификатор формата.
             - ext (str): Расширение файла (например, "mp4").
             - width (int | None): Ширина видео или None (если аудиофайл).
@@ -55,34 +57,25 @@ def get_formats_vk_video(video_info):
             - tbr (float | str): Средний битрейт в кбит/с или "Неизвестно".
     """
     formats = video_info.get("formats", [])
-    unique_resolutions = {}  # Словарь для хранения уникальных форматов
-    best_audio = None
 
-    # Поиск лучшего аудио (с наибольшим abr)
+    unique_resolutions = {}  # Словарь для хранения уникальных видео-форматов
+    best_audio = None  # Лучший аудиоформат
+
+    # Находим лучший аудиоформат (наибольший abr)
     for f in formats:
-        if f.get("vcodec") == "none":
-            if best_audio is None or f.get("abr", 0) > best_audio.get("abr", 0):
-                best_audio = f
+        if f.get("vcodec") == "none" and f.get("ext") == "m4a":  # Только аудио форматы M4A
+            f_abr = f.get("abr") or 0  # Если abr отсутствует, заменяем на 0
+            best_audio_abr = best_audio.get("abr", 0) if best_audio else 0
 
-    result = []
-
-    # Добавляем только один лучший аудиоформат, если найден
-    if best_audio:
-        result.append({
-            "format_id": best_audio.get("format_id", "Неизвестно"),
-            "ext": best_audio.get("ext", "Неизвестно"),
-            "width": None,
-            "height": None,
-            "filesize": best_audio.get("filesize") or "Неизвестно",
-            "tbr": best_audio.get("tbr") or "Неизвестно"
-        })
+            if best_audio is None or f_abr > best_audio_abr:
+                best_audio = f  # Запоминаем лучший аудиоформат
 
     # Обрабатываем видео-форматы, уникализируя их по `resolution`
     for f in formats:
-        if f.get("vcodec") != "none":  # Исключаем аудио
+        if f.get("vcodec") != "none" and f.get('width') != None:  # Исключаем аудио
             resolution = f.get("resolution", f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}")
 
-            if resolution not in unique_resolutions:  # Уникализируем
+            if resolution not in unique_resolutions:  # Уникализируем по разрешению
                 unique_resolutions[resolution] = {
                     "format_id": f.get("format_id", "Неизвестно"),
                     "ext": f.get("ext", "Неизвестно"),
@@ -92,29 +85,50 @@ def get_formats_vk_video(video_info):
                     "tbr": f.get("tbr") or "Неизвестно"
                 }
 
-    # Добавляем в итоговый список только уникальные видео-форматы
-    result.extend(unique_resolutions.values())
+    # Формируем итоговый список с нумерацией
+    result = {}
+    index = 1
 
+    # Добавляем лучший аудиоформат (если найден)
+    if best_audio:
+        result[index] = [{
+            "format_id": best_audio.get("format_id", "Неизвестно"),
+            "ext": best_audio.get("ext", "Неизвестно"),
+            "width": None,
+            "height": None,
+            "filesize": best_audio.get("filesize") or "Неизвестно",
+            "tbr": best_audio.get("tbr") or "Неизвестно"
+        }]
+        index += 1
+
+    # Добавляем видео-форматы
+    for video_format in unique_resolutions.values():
+        result[index] = [video_format]
+        index += 1
     return result
 
-def make_keyboard_vk(formats, duration):
+
+def make_keyboard_vk(formats_dict, duration):
     """
-        Создаёт клавиатуру с кнопками для скачивания аудио и видео из VK.
+    Создаёт клавиатуру с кнопками для скачивания аудио и видео из VK.
 
-        Args:
-            formats (list[dict]): Список форматов видео и аудио, полученный из yt-dlp.
-            duration (int | None): Длительность видео в секундах или None, если неизвестно.
+    Args:
+        formats_dict (dict[int, list]): Словарь форматов, где ключ — номер формата,
+                                        значение — список с одним словарем (формат видео/аудио).
+        duration (int | None): Длительность видео в секундах или None, если неизвестно.
 
-        Returns:
-            InlineKeyboardMarkup: Объект клавиатуры с кнопками загрузки.
-        """
+    Returns:
+        InlineKeyboardMarkup: Объект клавиатуры с кнопками загрузки.
+    """
     button_list = []
-    added_audio = False  # Флаг, чтобы не добавлять аудио несколько раз
 
-    for f in formats:
-        resolution_text = "Аудио" if f.get("width") is None else f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}"
+    for num, format_list in formats_dict.items():
+        f = format_list[0]  # Достаём единственный элемент списка
 
-        # Проверяем, есть ли 'vbr' и 'duration'
+        resolution_text = "Аудио" if f.get(
+            "width") is None else f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}"
+
+        # Проверяем, есть ли 'tbr' и 'duration'
         if 'tbr' in f and isinstance(f['tbr'], (int, float)) and duration:
             # Рассчитываем размер файла
             file_size = (f['tbr'] * duration) / (8 * 1024)  # в МБ
@@ -123,22 +137,15 @@ def make_keyboard_vk(formats, duration):
             # Если данных недостаточно, выводим "Неизвестно"
             size_text = "Неизвестно"
 
-        if resolution_text == "Аудио":
-            if not added_audio:  # Добавляем аудио только один раз
-                button_list.append([
-                    InlineKeyboardButton(
-                        text=f"Скачать {emoji.emojize(EMOJIS['sound'])} {resolution_text} {emoji.emojize(EMOJIS['size'])} {size_text}",
-                        callback_data=f"vk_download_audio:{f.get('format_id', 'Неизвестно')}:{size_text}"
-                    )
-                ])
-                added_audio = True  # Помечаем, что аудио уже добавлено
-        else:
-            button_list.append([
-                InlineKeyboardButton(
-                    text=f"Скачать {emoji.emojize(EMOJIS['resolutions'])} {resolution_text} {emoji.emojize(EMOJIS['size'])} {size_text}",
-                    callback_data=f"vk_download_video:{f.get('format_id', 'Неизвестно')}:{size_text}"
-                )
-            ])
+        # Определяем тип callback
+        callback_type = "vk_audio" if resolution_text == "Аудио" else "vk_video"
+
+        button_list.append([
+            InlineKeyboardButton(
+                text=f"Скачать {emoji.emojize(EMOJIS['sound'] if resolution_text == 'Аудио' else EMOJIS['resolutions'])} {resolution_text} {emoji.emojize(EMOJIS['size'])} {size_text}",
+                callback_data=f"{callback_type}:{num}:{size_text}"  # Используем номер формата
+            )
+        ])
 
     return InlineKeyboardMarkup(inline_keyboard=button_list)
 
@@ -184,5 +191,39 @@ def download_vk_video(db: Session, user_id: int, format_id):
     except Exception as e:
         print(f"Ошибка при скачивании: {e}")
         return None
+
+def get_format_id_from_callback(callback_data, formats_dict):
+    """
+    Получает format_id из callback_data, используя словарь форматов.
+
+    Args:
+        callback_data (str): Данные callback в формате "vk_audio:номер:размер".
+        formats_dict (dict[int, list]): Словарь форматов, где ключ — номер формата.
+
+    Returns:
+        str: format_id соответствующего формата или "Неизвестно", если не найден.
+    """
+    try:
+        format_number = int(callback_data.split(":")[1])  # Извлекаем номер формата
+        format_info = formats_dict.get(format_number)  # Получаем список с инфо
+
+        if format_info:
+            return format_info[0].get("format_id", "Неизвестно")  # Возвращаем format_id
+    except (IndexError, ValueError):
+        pass  # Если callback_data невалидный, просто возвращаем "Неизвестно"
+
+    return "Неизвестно"
+
+def is_under_2gb(size_str):
+    match = re.search(r"([\d.]+)\s*(MB|GB)", size_str, re.IGNORECASE)  # Извлекаем число и единицу измерения
+    if not match:
+        return False  # Если формат неправильный, возвращаем False
+
+    size, unit = float(match.group(1)), match.group(2).upper()
+
+    if unit == "GB":
+        size *= 1024  # Переводим гигабайты в мегабайты
+
+    return size >= 2048  # Проверяем, не больше ли 2 ГБ
 
 
