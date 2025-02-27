@@ -75,12 +75,12 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
             info = ydl.extract_info(url, download=True)
             resolution = info.get('resolution', 'unknown')
             ext = info.get('ext', 'mkv')  # Если не найдено расширение, по умолчанию 'mkv'
-    except utils.ExtractorError as e:
-        logging.info(f'__yout.py__79__ Video format problem')
-        return None, f'У видео проблема с форматами. Ошибка {e}'
-    except utils.DownloadError as e:
-        logging.info(f'__yout.py__82__ Video download problem')
-        return None, f'У видео проблема с загрузкой. Ошибка {e}'
+    # except utils.ExtractorError as e:
+    #     logging.info(f'__yout.py__79__ Video format problem')
+    #     return None, f'У видео проблема с форматами. Ошибка {e}'
+    # except utils.DownloadError as e:
+    #     logging.info(f'__yout.py__82__ Video download problem')
+    #     return None, f'У видео проблема с загрузкой. Ошибка {e}'
     except Exception as e:
         logging.info(f'__yout.py__85__ Video is not availibale in country')
         return None, f'Данное видео заблокированно в регионе. Ошибка {e}'
@@ -112,7 +112,6 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
     file_abs = os.path.abspath(output_file)
     if not file_abs or not os.path.exists(file_abs):
         raise FileNotFoundError(f"Файл {file_abs} не найден.")
-    print(output_file)
     return output_file, video_info
 
 def get_video_info(url):
@@ -170,116 +169,62 @@ def get_video_info(url):
 
 def filter_formats_by_vcodec_and_size(audio, formats, vcodec_prefix="avc1"):
     """
-    Фильтрует список видеоформатов по префиксу видеокодека и наличию размера файла.
-    Также добавляет лучший аудиоформат в начало списка.
+    Фильтрует список форматов по префиксу видеокодека и наличию размера файла.
 
     Args:
-        audio (int | float | None): Размер аудиофайла в байтах или None, если неизвестен.
-        formats (list[dict]): Список форматов, полученный из yt-dlp.
-        vcodec_prefix (str, optional): Префикс видеокодека для фильтрации (по умолчанию "avc1").
+        formats (list): Список форматов, полученный из yt-dlp.
+        vcodec_prefix (str): Префикс видеокодека для фильтрации (например, "avc1").
 
     Returns:
-        dict[int, list]: Словарь форматов с номерами от 1, где:
-            - format_id (str): Уникальный идентификатор формата.
-            - ext (str): Расширение файла (например, "mp4").
-            - width (int | None): Ширина видео или None (если аудиофайл).
-            - height (int | None): Высота видео или None (если аудиофайл).
-            - filesize (int | str): Размер файла в байтах или "Неизвестно".
-            - tbr (float | str): Средний битрейт в кбит/с или "Неизвестно".
+        list: Список форматов, где видеокодек начинается с заданного префикса и указан размер файла.
     """
-    unique_formats = {}  # Храним уникальные видеоформаты
-    best_audio = None  # Лучший аудиоформат
-    audio_size = audio if isinstance(audio, (int, float)) else 0
+    filtered_formats = []
+    if isinstance(audio, (int, float)):
+        audio_size = audio
+    else:
+        audio_size = 0
 
-    # Проходим по списку форматов и определяем лучший аудиоформат
-    for f in formats:
-        if f.get("vcodec") == "none" and f.get("abr") is not None:  # Это аудиофайл
-            if best_audio is None or f.get("abr", 0) > best_audio.get("abr", 0):
-                best_audio = f  # Запоминаем лучший аудиоформат
-
-    # Фильтруем видеоформаты
     for f in formats:
         vcodec = f.get("vcodec", "")
         filesize = f.get("filesize", None)
+        if vcodec.startswith(vcodec_prefix) and filesize:  # Проверяем, начинается ли vcodec с "avc1" и есть ли размер
+            format_id = f.get("format_id", "N/A")
+            ext = f.get("ext", "N/A")
+            resolution = f.get("resolution", f"{f.get('width', 'N/A')}x{f.get('height', 'N/A')}")
+            total_size = filesize + audio_size
+            filesize_str = f"{round(total_size / (1024 ** 2), 2)} MB"  # Преобразуем размер в MB
 
-        if vcodec.startswith(vcodec_prefix) and filesize:  # Проверяем видеокодек и размер
-            resolution = f.get("resolution", f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}")
+            # Сохраняем формат с подробной информацией
+            filtered_formats.append({
+                "format_id": format_id,
+                "extension": ext,
+                "resolution": resolution,
+                "vcodec": vcodec,
+                "filesize": filesize_str,
+            })
 
-            if resolution not in unique_formats:  # Добавляем только уникальные разрешения
-                total_size = filesize + audio_size  # Учитываем аудио
-                unique_formats[resolution] = {
-                    "format_id": f.get("format_id", "Неизвестно"),
-                    "ext": f.get("ext", "Неизвестно"),
-                    "width": f.get("width"),
-                    "height": f.get("height"),
-                    "filesize": total_size or "Неизвестно",
-                    "tbr": f.get("tbr") or "Неизвестно"
-                }
-
-    # Формируем финальный словарь с номерами
-    result = {}
-    index = 1
-
-    # Сначала добавляем аудио, если оно найдено
-    if best_audio:
-        result[index] = [{
-            "format_id": best_audio.get("format_id", "Неизвестно"),
-            "ext": best_audio.get("ext", "Неизвестно"),
-            "width": None,
-            "height": None,
-            "filesize": best_audio.get("filesize") or "Неизвестно",
-            "tbr": best_audio.get("tbr") or "Неизвестно"
-        }]
-        index += 1
-
-    # Затем добавляем видеоформаты
-    for resolution, format_data in unique_formats.items():
-        result[index] = [format_data]
-        index += 1
-    return result
+    return filtered_formats
 
 def main_kb(filtered_formats, audio_id, audio_size):
     """
-    Формирует клавиатуру с кнопками для скачивания аудио и видео.
+           Формирует клавиатуру из списка форматов
 
-    Args:
-        filtered_formats (dict[int, list]): Словарь списков форматов, где:
-            - Ключ (int) — номер формата.
-            - Значение (list[dict]) — список словарей с информацией о формате.
-        audio_id (str): ID аудиофайла.
-        audio_size (int): Размер аудиофайла в байтах.
+           Args:
+               filtered_formats (list): Список доступных форматов видео
+               audio_id (str): ID аудио файла
+               audio_size (str): Размер аудио файла
 
-    Returns:
-        InlineKeyboardMarkup: Объект клавиатуры с кнопками загрузки.
-    """
+           Returns:
+               list: Список клавиш
+           """
     button_list = []
-    index = 1  # Начинаем нумерацию с 1
-
-    # Добавляем кнопку для скачивания аудио с индексом 1
-    size_text = f"{round(audio_size / (1024 ** 2), 2)} MB" if audio_size else "Неизвестно"
-    button_list.append([
-        InlineKeyboardButton(
-            text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} Аудио {emoji.emojize(EMOJIS['size'])} {size_text}",
-            callback_data=f"yt_audio:{index}:{size_text}"
-        )
-    ])
-
-    # Добавляем кнопки для видеоформатов, начиная с 2
-    for format_list in filtered_formats.values():  # filtered_formats — это dict, где ключи не важны
-        f = format_list[0]  # Берем первый элемент списка (основной формат)
-        if f['ext'] == 'm4a' or f['ext'] == 'webm':  # Пропускаем m4a и webm
-            continue
-
-        size_text = f"{round(f['filesize'] / (1024 ** 2), 2)} MB" if isinstance(f['filesize'], (int, float)) else "Неизвестно"
-
-        button_list.append([
-            InlineKeyboardButton(
-                text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['width']}x{f['height']} {emoji.emojize(EMOJIS['size'])} {size_text}",
-                callback_data=f"yt_video:{index}:{size_text}"
-            )
-        ])
-        index += 1  # Увеличиваем индекс
-
+    button_list.append([InlineKeyboardButton(
+        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB", callback_data=f"download_audio:{audio_id}")])
+    for f in filtered_formats:
+        format_id = ['format_id']
+        if format_id:
+            callback_data = f"download:{f['format_id']}"
+            button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}", callback_data=callback_data)])
     # Создаем клавиатуру с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)
     return keyboard

@@ -14,6 +14,9 @@ from aiogram.types import FSInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
+from aiogram.client.telegram import TelegramAPIServer
+from aiogram.client.session.aiohttp import AiohttpSession
+
 from db import get_db, update_or_create_user
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
@@ -37,6 +40,7 @@ logging.basicConfig(
 DOWNLOAD_DIR = "videos"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# session = AiohttpSession(api=TelegramAPIServer.from_base('http://localhost:8081'))
 bot = Bot(os.getenv('TOKEN'))
 dp = Dispatcher()
 
@@ -49,7 +53,7 @@ async def start_handler(message: types.Message):
     await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK видео или Tik Tok, и я предоставлю варианты для скачивания!")
 
 @dp.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
-async def youtube_handler(message: types.Message, state: FSMContext):
+async def youtube_handler(message: types.Message):
     url = message.text.strip()
     user_id = message.from_user.id
 
@@ -75,16 +79,13 @@ async def youtube_handler(message: types.Message, state: FSMContext):
         formats = info.get("formats", [])
 
         # Фильтруем форматы
-        FORMAT_DICT = filter_formats_by_vcodec_and_size(audio_size, formats, "avc1")
-
-        await state.update_data(format_dict=FORMAT_DICT)
-        logging.debug(f"Сохранено в state: {FORMAT_DICT}")
+        filtered_formats = filter_formats_by_vcodec_and_size(audio_size, formats, "avc1")
 
         # Отправляем информацию о видео и клавиатуру
         msg_keyboard = await message.reply_photo(
             thumbnail,
             caption=f"Видео: {title}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-            reply_markup=main_kb(FORMAT_DICT, audio_id, audio_size)
+            reply_markup=main_kb(filtered_formats, audio_id, audio_size)
         )
 
         # Сохраняем ID сообщения для пользователя
@@ -205,17 +206,10 @@ async def handle_invalid_message(message: types.Message):
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
 
 
-@dp.callback_query(lambda call: call.data.startswith('yt_video:') or call.data.startswith('yt_audio:'))
-async def download_handler(callback_query: types.CallbackQuery, state: FSMContext):
-    user_data = await state.get_data()
-    FORMAT_DICT = user_data.get("format_dict", {})
-
-    format_id = get_format_id_from_callback(callback_query.data, FORMAT_DICT)
+@dp.callback_query(lambda call: call.data.startswith('download:') or call.data.startswith('download_audio:'))
+async def download_handler(callback_query: types.CallbackQuery):
+    format_id = callback_query.data.split(':')[1]
     user_id = callback_query.from_user.id
-    file_size_id = callback_query.data.split(':')[2]
-    if is_under_2gb(file_size_id):
-        await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
-        return
     db = next(get_db())
 
     logging.debug(f"Download request from {user_id}: format {format_id}")
@@ -233,23 +227,13 @@ async def download_handler(callback_query: types.CallbackQuery, state: FSMContex
                 logging.info(f"Message updated for {user_id}")
             except Exception as e:
                 logging.warning(f"Error updating message for {user_id}: {e}")
+
         # Скачивание видео
         output_file, video_info = download_and_merge_by_format(db, user_id, format_id)
-        if output_file is None:
-            await callback_query.message.answer("Ошибка: Видео недоступно или удалено.")
-            if user_id in user_messages:
-                try:
-                    await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
-                    del user_messages[user_id]
-                    logging.info(f"Old message with keyboard deleted for {user_id}")
-                except Exception as e:
-                    logging.warning(f"Error deleting message for {user_id}: {e}")
-            return
-        else:
-            logging.info(f"Video downloaded for {user_id}: {output_file}")
+        logging.info(f"Video downloaded for {user_id}: {output_file}")
 
         # Проверка и конвертация аудио
-        if callback_query.data.startswith('yt_audio'):
+        if callback_query.data.startswith('download_audio'):
             if output_file.endswith('.webm'):
                 output_file = convert_webm_to_m4a(output_file)
                 logging.info(f"File converted to M4A for {user_id}: {output_file}")
@@ -285,7 +269,7 @@ async def download_handler(callback_query: types.CallbackQuery, state: FSMContex
         )
 
         # Отправка пользователю
-        if callback_query.data.startswith('yt_audio'):
+        if callback_query.data.startswith('download_audio'):
             audio_file = FSInputFile(output_file)
             await callback_query.message.answer_audio(
                 audio=audio_file,
@@ -306,7 +290,8 @@ async def download_handler(callback_query: types.CallbackQuery, state: FSMContex
 
         if os.path.exists(output_file):
             os.remove(output_file)
-            logging.info(f"main.py___286___File vor {user_id}: {output_file} is delete ")
+            logging.info(f"main.py___377___File vor {user_id}: {output_file} is delete ")
+
         # Удаление старого сообщения с клавиатурой
         if user_id in user_messages:
             try:
