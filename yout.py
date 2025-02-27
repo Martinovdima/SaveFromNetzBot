@@ -219,11 +219,11 @@ def main_kb(filtered_formats, audio_id, audio_size):
            """
     button_list = []
     button_list.append([InlineKeyboardButton(
-        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB", callback_data=f"download_audio:{audio_id}")])
+        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB", callback_data=f"yt_audio:{audio_id}")])
     for f in filtered_formats:
         format_id = ['format_id']
         if format_id:
-            callback_data = f"download:{f['format_id']}"
+            callback_data = f"yt_video:{f['format_id']}:{f['filesize']}"
             button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}", callback_data=callback_data)])
     # Создаем клавиатуру с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)

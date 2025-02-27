@@ -214,16 +214,6 @@ def get_format_id_from_callback(callback_data, formats_dict):
 
     return "Неизвестно"
 
-def is_under_2gb(size_str):
-    match = re.search(r"([\d.]+)\s*(MB|GB)", size_str, re.IGNORECASE)  # Извлекаем число и единицу измерения
-    if not match:
-        return False  # Если формат неправильный, возвращаем False
 
-    size, unit = float(match.group(1)), match.group(2).upper()
-
-    if unit == "GB":
-        size *= 1024  # Переводим гигабайты в мегабайты
-
-    return size >= 2048  # Проверяем, не больше ли 2 ГБ
 
 

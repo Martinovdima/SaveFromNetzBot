@@ -20,9 +20,9 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from db import get_db, update_or_create_user
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
-from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX
+from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
-from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video, get_format_id_from_callback, is_under_2gb
+from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video, get_format_id_from_callback
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -206,10 +206,14 @@ async def handle_invalid_message(message: types.Message):
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
 
 
-@dp.callback_query(lambda call: call.data.startswith('download:') or call.data.startswith('download_audio:'))
+@dp.callback_query(lambda call: call.data.startswith('yt_video:') or call.data.startswith('yt_audio:'))
 async def download_handler(callback_query: types.CallbackQuery):
     format_id = callback_query.data.split(':')[1]
     user_id = callback_query.from_user.id
+    file_size_id = callback_query.data.split(':')[2]
+    if is_under_2gb(file_size_id):
+        await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
+        return
     db = next(get_db())
 
     logging.debug(f"Download request from {user_id}: format {format_id}")
@@ -233,7 +237,7 @@ async def download_handler(callback_query: types.CallbackQuery):
         logging.info(f"Video downloaded for {user_id}: {output_file}")
 
         # Проверка и конвертация аудио
-        if callback_query.data.startswith('download_audio'):
+        if callback_query.data.startswith('yt_audio'):
             if output_file.endswith('.webm'):
                 output_file = convert_webm_to_m4a(output_file)
                 logging.info(f"File converted to M4A for {user_id}: {output_file}")
@@ -269,7 +273,7 @@ async def download_handler(callback_query: types.CallbackQuery):
         )
 
         # Отправка пользователю
-        if callback_query.data.startswith('download_audio'):
+        if callback_query.data.startswith('yt_audio'):
             audio_file = FSInputFile(output_file)
             await callback_query.message.answer_audio(
                 audio=audio_file,

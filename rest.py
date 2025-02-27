@@ -1,4 +1,5 @@
 import os
+import re
 import surrogates
 from aiogram.types import FSInputFile
 
@@ -8,6 +9,17 @@ def make_a_folders():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     return DOWNLOAD_DIR
 
+def is_under_2gb(size_str):
+    match = re.search(r"([\d.]+)\s*(MB|GB)", size_str, re.IGNORECASE)  # Извлекаем число и единицу измерения
+    if not match:
+        return False  # Если формат неправильный, возвращаем False
+
+    size, unit = float(match.group(1)), match.group(2).upper()
+
+    if unit == "GB":
+        size *= 1024  # Переводим гигабайты в мегабайты
+
+    return size >= 2048  # Проверяем, не больше ли 2 ГБ
 
 # Список эмодзи для  отображения информации
 EMOJIS = {
