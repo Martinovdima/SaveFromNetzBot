@@ -219,7 +219,7 @@ def main_kb(filtered_formats, audio_id, audio_size):
            """
     button_list = []
     button_list.append([InlineKeyboardButton(
-        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB", callback_data=f"yt_audio:{audio_id}")])
+        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB", callback_data=f"yt_audio:{audio_id}:{audio_size}")])
     for f in filtered_formats:
         format_id = ['format_id']
         if format_id:

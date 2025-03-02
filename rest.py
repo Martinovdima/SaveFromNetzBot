@@ -4,6 +4,8 @@ import surrogates
 from aiogram.types import FSInputFile
 
 
+import logging
+
 def make_a_folders():
     DOWNLOAD_DIR = "videos"
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -12,6 +14,7 @@ def make_a_folders():
 def is_under_2gb(size_str):
     match = re.search(r"([\d.]+)\s*(MB|GB)", size_str, re.IGNORECASE)  # Извлекаем число и единицу измерения
     if not match:
+        logging.info(f'Не удалось проверить размер запрашиваемого файла')
         return False  # Если формат неправильный, возвращаем False
 
     size, unit = float(match.group(1)), match.group(2).upper()
@@ -21,7 +24,17 @@ def is_under_2gb(size_str):
 
     return size >= 2048  # Проверяем, не больше ли 2 ГБ
 
-# Список эмодзи для  отображения информации
+def delete_keyboard_message(user_id: int):
+    if user_id in user_messages:
+        try:
+            logging.info(f"Сообщение с клавиатурой у {user_id} пользователя удалено")
+            return True
+        except Exception as e:
+            logging.warning(f"Ошибка удаления сообщения с клавиатурой {user_id}: {e}")
+            return False
+
+
+# Список эмодзи для отображения информации
 EMOJIS = {
     'title': surrogates.decode('\U0001F3AD'),
     'autor': surrogates.decode('\U0001F464'),
@@ -52,3 +65,6 @@ VK_VIDEO_REGEX = r"(https?://)?(www\.)?(vk\.com|vkvideo\.ru)/video[-\d]+_\d+"
 
 INFO_MESSAGE = " Получаю информацию о видео..."
 DOWNLOAD_DIR = make_a_folders()
+
+# Хранение идентификаторов сообщений с клавиатурой для каждого пользователя
+user_messages = {}
