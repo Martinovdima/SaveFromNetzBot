@@ -19,7 +19,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 
 from db import get_db, update_or_create_user
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
-from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
+from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE, WAITING_IMAGE
 from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb, user_messages, delete_keyboard_message
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
 from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video, get_format_id_from_callback
@@ -90,6 +90,7 @@ async def youtube_handler(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка процесса обработки ссылки на Youtube от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         if 'msg_info' in locals():
             await msg_info.delete()
 
@@ -126,6 +127,7 @@ async def tiktok_handler(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка процесса обработки ссылки на TikTok от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         if 'msg_info' in locals():
             await msg_info.delete()
 
@@ -167,6 +169,7 @@ async def vk_video_handler(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка процесса обработки ссылки на VK video от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         if 'msg_info' in locals():
             await msg_info.delete()
 
@@ -176,6 +179,7 @@ async def handle_invalid_message(message: types.Message):
     user_id = message.from_user.id
     logging.debug(f"Message received from user {user_id} ***FAILED_LINK***")
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
+    await bot.send_photo(chat_id=user_id, photo=WAITING_IMAGE, caption=f'Отправляй следующую ссылку............')
 
 
 @dp.callback_query(lambda call: call.data.startswith('yt_video:') or call.data.startswith('yt_audio:'))
@@ -282,7 +286,7 @@ async def download_handler(callback_query: types.CallbackQuery):
                 logging.info(f"Old message with keyboard deleted for {user_id}")
             except Exception as e:
                 logging.warning(f"Error deleting message for {user_id}: {e}")
-
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
     except Exception as e:
         logging.error(f"Error downloading for {user_id}: {e}")
 
@@ -294,6 +298,7 @@ async def download_handler(callback_query: types.CallbackQuery):
                 logging.info(f"Message deleted after error for {user_id}")
             except Exception as e:
                 logging.warning(f"Error deleting message after failure for {user_id}: {e}")
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
 
         if callback_query.message:
             try:
@@ -384,6 +389,7 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
                 logging.info(f"Old message with keyboard deleted for {user_id}")
             except Exception as e:
                 logging.warning(f"Error deleting message for {user_id}: {e}")
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
 
     except Exception as e:
         logging.error(f"Error downloading for {user_id}: {e}")
@@ -397,7 +403,16 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
             except Exception as e:
                 logging.warning(f"Error deleting message after failure for {user_id}: {e}")
 
-        await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+
+
+        if callback_query.message:
+            try:
+                await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+            except exceptions.TelegramBadRequest:
+                await bot.send_photo(chat_id=callback_query.from_user.id, photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        else:
+            await bot.send_photo(chat_id=callback_query.from_user.id, photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
 @dp.callback_query(lambda call: call.data.startswith('vk_video:') or call.data.startswith('vk_audio:'))
 async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMContext):
@@ -503,6 +518,8 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
             except Exception as e:
                 logging.warning(f"Ошибка при удалении сообщения: {e}")
 
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+
     except Exception as e:
         logging.warning(f"Не удалось скачать файл: {e}")
         # После завершения скачивания удаляем старое сообщение с клавиатурой
@@ -512,7 +529,15 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                 del user_messages[user_id]  # Удаляем ID сообщения после удаления
             except Exception as e:
                 logging.warning(f"Ошибка при удалении сообщения: {e}")
-        await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+
+        if callback_query.message:
+            try:
+                await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
+            except exceptions.TelegramBadRequest:
+                await bot.send_photo(chat_id=callback_query.from_user.id, photo=ERROR_IMAGE, caption=ERROR_TEXT)
+        else:
+            await bot.send_photo(chat_id=callback_query.from_user.id, photo=ERROR_IMAGE, caption=ERROR_TEXT)
 
 
 

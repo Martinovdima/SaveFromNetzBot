@@ -56,6 +56,7 @@ ERROR_IMAGE = FSInputFile(os.path.abspath("images/error.webp"))
 FAILS_IMAGE = FSInputFile(os.path.abspath("images/invalid_input.webp"))
 LOAD_IMAGE = FSInputFile(os.path.abspath("images/loading.webp"))
 START_IMAGE = FSInputFile(os.path.abspath("images/start_hello.webp"))
+WAITING_IMAGE = FSInputFile(os.path.abspath("images/waiting.webp"))
 ERROR_TEXT = f"Что-то пошло не так, попробуйте позже..."
 
 # Регулярные выражения для поиска ссылок
