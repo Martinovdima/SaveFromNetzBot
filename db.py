@@ -1,6 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, func
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 
 # Настройка базы данных
 Base = declarative_base()
@@ -64,5 +64,10 @@ def update_or_create_user(db, user_id, url, video_id, title):
         user = User(user_id=user_id, url=url, video_id=video_id, title=title)  # Создаем нового пользователя
         db.add(user)
     db.commit()
+
+def count_users(db: Session):
+    return db.query(func.count(User.id)).scalar()
+
+
 
 

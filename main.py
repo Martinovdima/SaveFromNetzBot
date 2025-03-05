@@ -13,13 +13,16 @@ from aiogram import Bot, Dispatcher, types, exceptions
 from aiogram.types import FSInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
 
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.client.session.aiohttp import AiohttpSession
 
-from db import get_db, update_or_create_user
+import db
+from db import get_db, update_or_create_user, count_users
 from yout import sanitize_filename, download_and_merge_by_format, get_video_info, filter_formats_by_vcodec_and_size, main_kb, convert_webm_to_m4a
-from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE, WAITING_IMAGE
+from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
 from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb, user_messages, delete_keyboard_message
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
 from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video, get_format_id_from_callback
@@ -46,11 +49,20 @@ dp = Dispatcher()
 
 
 
+class VideoProcessing(StatesGroup):
+    waiting_for_processing = State()
+
+
 
 @dp.message(Command(commands=['start']))
 async def start_handler(message: types.Message):
     await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK видео или Tik Tok, и я предоставлю варианты для скачивания!")
 
+@dp.message(Command(commands=['admin']))
+async def admin_handler(message: types.Message):
+    db = next(get_db())  # Получаем сессию БД
+    user_count = count_users(db)
+    await message.answer(text=f'Всего пользователей в базе {user_count}')
 
 @dp.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
 async def youtube_handler(message: types.Message):
@@ -58,22 +70,26 @@ async def youtube_handler(message: types.Message):
     user_id = message.from_user.id
     db = next(get_db())
 
+
     logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка {url}")
+
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
+
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
 
         audio_id, audio_size, title, thumbnail, info, video_id = get_video_info(url)
         title_sanitaze = sanitize_filename(title)
-        logging.info(f"Видео ID: {video_id},Название: {title_sanitaze}")
+        logging.info(f"Видео ID: {video_id}, Название: {title_sanitaze}")
 
         update_or_create_user(db, user_id, url, video_id, title_sanitaze)
         logging.info(f"Данные от пользователя {user_id} сохранены в базе данных")
 
         if not info:
             await message.reply(text=emoji.emojize(EMOJIS['warning']) + "Не удалось найти доступные форматы для этого видео.")
+
             return
 
         filtered_formats = filter_formats_by_vcodec_and_size(audio_size, info.get("formats", []), "avc1")
@@ -84,15 +100,16 @@ async def youtube_handler(message: types.Message):
         )
 
         user_messages[user_id] = msg_keyboard.message_id
-        logging.debug(f"Клавиатура сформированна и отправлена пользователю {user_id}")
+        logging.debug(f"Клавиатура сформирована и отправлена пользователю {user_id}")
         await msg_info.delete()
 
     except Exception as e:
-        logging.error(f"Ошибка процесса обработки ссылки на Youtube от пользователя {user_id}: - {e}")
+        logging.error(f"Ошибка обработки ссылки от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
-        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+        await bot.send_message(chat_id=user_id, text="⏳ Жду следующую ссылку....")
         if 'msg_info' in locals():
             await msg_info.delete()
+
 
 @dp.message(lambda message: re.search(TIKTOK_REGEX, message.text, re.IGNORECASE))
 async def tiktok_handler(message: types.Message):
@@ -179,7 +196,7 @@ async def handle_invalid_message(message: types.Message):
     user_id = message.from_user.id
     logging.debug(f"Message received from user {user_id} ***FAILED_LINK***")
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
-    await bot.send_photo(chat_id=user_id, photo=WAITING_IMAGE, caption=f'Отправляй следующую ссылку............')
+
 
 
 @dp.callback_query(lambda call: call.data.startswith('yt_video:') or call.data.startswith('yt_audio:'))
