@@ -14,7 +14,7 @@ def make_a_folders():
 def is_under_2gb(size_str):
     match = re.search(r"([\d.]+)\s*(MB|GB)", size_str, re.IGNORECASE)  # Извлекаем число и единицу измерения
     if not match:
-        logging.info(f'Не удалось проверить размер запрашиваемого файла')
+        logging.debug(f'Не удалось проверить размер запрашиваемого файла')
         return False  # Если формат неправильный, возвращаем False
 
     size, unit = float(match.group(1)), match.group(2).upper()

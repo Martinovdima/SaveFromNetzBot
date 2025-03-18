@@ -2,7 +2,8 @@ from yt_dlp import YoutubeDL
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import emoji
 import os
-import re
+import asyncio
+
 
 from sqlalchemy.orm import Session
 from db import User
@@ -149,9 +150,10 @@ def make_keyboard_vk(formats_dict, duration):
 
     return InlineKeyboardMarkup(inline_keyboard=button_list)
 
-def download_vk_video(db: Session, user_id: int, format_id):
+
+async def download_vk_video_async(db: Session, user_id: int, format_id):
     """
-    Загружает видео с VK по сохранённой ссылке пользователя.
+    Асинхронно загружает видео с VK с помощью yt-dlp.
 
     Args:
         db (Session): Сессия базы данных для получения данных пользователя.
@@ -159,38 +161,52 @@ def download_vk_video(db: Session, user_id: int, format_id):
         format_id (str): Идентификатор формата видео.
 
     Returns:
-        tuple[str, dict] | None: Кортеж из:
+        tuple[str, dict] | None:
             - str: Путь к загруженному файлу.
             - dict: Информация о видео из yt-dlp.
-            Возвращает None в случае ошибки или если файл не найден.
-
+            - None, если произошла ошибка.
     """
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user or not user.url:
-        raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
 
-    url = user.url
-    title = user.title
-    video_id = user.video_id
+    def sync_download():
+        ffmpeg_path = os.path.abspath("ffmpeg/bin/ffmpeg.exe")
+        os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
+        """Синхронная функция для скачивания видео (запускается в отдельном потоке)."""
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user or not user.url:
+            raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
 
-    ydl_opts = {
-        'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}_%(resolution)s{video_id}.%(ext)s"),  # Формат имени файла
-        'merge_output_format': 'mp4',  # Принудительное объединение в MP4
-        'quiet': False,  # Выводит процесс загрузки
-        'noplaylist': True,  # Загружает только одно видео
-    }
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)  # Загружаем видео
-            ext = info.get('ext', 'mp4')  # Если не найдено расширение, по умолчанию 'mkv'
-            resolution = info.get('resolution', 'unknow')
-            file_path = os.path.join(DOWNLOAD_DIR, f"{title}_{resolution}{video_id}.{ext}")
-            return file_path, info if os.path.exists(file_path) else None
-    except Exception as e:
-        print(f"Ошибка при скачивании: {e}")
-        return None
+        url = user.url
+        title = user.title
+        video_id = user.video_id
+
+        ydl_opts = {
+            'format': f'{format_id}+ba/best',
+            'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}_{video_id}.%(ext)s"),
+            'merge_output_format': 'mp4',
+            'quiet': True,
+            'noplaylist': True,
+            'http_chunk_size': 2097152,  # 2MB
+            'concurrent-fragments': 15,  # 10 потоков
+            'ffmpeg_location': '/usr/bin/ffmpeg',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Referer': 'https://vk.com',
+            },
+        }
+
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)  # Скачиваем видео
+                ext = info.get('ext', 'mp4')  # Определяем расширение файла
+                file_path = os.path.join(DOWNLOAD_DIR, f"{title}_{video_id}.{ext}")
+                return file_path, info if os.path.exists(file_path) else None
+        except Exception as e:
+            print(f"Ошибка при скачивании: {e}")
+            return None
+
+    # Запускаем синхронную загрузку в отдельном потоке
+    return await asyncio.to_thread(sync_download)
 
 def get_format_id_from_callback(callback_data, formats_dict):
     """

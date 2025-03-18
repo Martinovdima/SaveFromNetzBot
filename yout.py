@@ -4,6 +4,7 @@ import re
 
 import emoji
 import subprocess
+import asyncio
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from yt_dlp import YoutubeDL, utils
@@ -28,7 +29,7 @@ def sanitize_filename(filename):
     sanitized = re.sub(r'[@<>:"/\\|?*]', '_', text)
     return re.sub(r"\s+", " ", sanitized).strip()
 
-def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> str:
+async def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> str:
     """
     Скачивает видео и аудио по выбранному формату, объединяет их и возвращает путь к итоговому файлу.
 
@@ -40,79 +41,84 @@ def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> s
     Returns:
         set: Путь к итоговому объединенному файлу, информация о файле.
     """
-    ffmpeg_path = os.path.abspath("ffmpeg/bin/ffmpeg.exe")
-    os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
-    # Получаем URL пользователя из базы данных
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user or not user.url:
-        raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
 
-    url = user.url
-    title = user.title
-    video_id = user.video_id
-    # Настройки для скачивания видео и аудио
-    ydl_opts = {
-        'cookiefile': "cookies.txt",
-        'verbose': True,
-        'format': f"{format_id}+bestaudio/best",  # Скачивание видео и аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}-%(resolution)s{video_id}.%(ext)s"),  # Имя файлов
-        'ffmpeg_location': ffmpeg_path,
-        'socket_timeout': 60,
-        'retries': 5,
-        'nocheckcertificate': True,
-        'postprocessors': [],  # Отключаем автоматическое объединение
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'extractor_args': {
-            'youtube': {
-                'formats': 'missing_pot'
+    def sync_download():
+        ffmpeg_path = os.path.abspath("ffmpeg/bin/ffmpeg.exe")
+        os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
+        # Получаем URL пользователя из базы данных
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user or not user.url:
+            raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
+
+        url = user.url
+        title = user.title
+        video_id = user.video_id
+        # Настройки для скачивания видео и аудио
+        ydl_opts = {
+            'cookiefile': "cookies.txt",
+            'verbose': True,
+            'format': f"{format_id}+bestaudio/best",  # Скачивание видео и аудио
+            'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}-%(resolution)s{video_id}.%(ext)s"),  # Имя файлов
+            'ffmpeg_location': ffmpeg_path,
+            'socket_timeout': 60,
+            'retries': 5,
+            'nocheckcertificate': True,
+            'postprocessors': [],  # Отключаем автоматическое объединение
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'extractor_args': {
+                'youtube': {
+                    'formats': 'missing_pot'
+                }
             }
         }
-    }
 
-    # Скачивание видео и аудио
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            resolution = info.get('resolution', 'unknown')
-            ext = info.get('ext', 'mkv')  # Если не найдено расширение, по умолчанию 'mkv'
-    # except utils.ExtractorError as e:
-    #     logging.info(f'__yout.py__79__ Video format problem')
-    #     return None, f'У видео проблема с форматами. Ошибка {e}'
-    # except utils.DownloadError as e:
-    #     logging.info(f'__yout.py__82__ Video download problem')
-    #     return None, f'У видео проблема с загрузкой. Ошибка {e}'
-    except Exception as e:
-        logging.info(f'__yout.py__85__ Video is not availibale in country')
-        return None, f'Данное видео заблокированно в регионе. Ошибка {e}'
+        # Скачивание видео и аудио
 
-    # Проверяем, что формат существует
-    formats = info.get("formats", [])
-    format_info = next((f for f in formats if f["format_id"] == format_id), None)
-    if not format_info:
-        raise ValueError(f"Формат с ID {format_id} не найден.")
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                resolution = info.get('resolution', 'unknown')
+                ext = info.get('ext', 'mkv')  # Если не найдено расширение, по умолчанию 'mkv'
+        # except utils.ExtractorError as e:
+        #     logging.info(f'__yout.py__79__ Video format problem')
+        #     return None, f'У видео проблема с форматами. Ошибка {e}'
+        # except utils.DownloadError as e:
+        #     logging.info(f'__yout.py__82__ Video download problem')
+        #     return None, f'У видео проблема с загрузкой. Ошибка {e}'
+        except Exception as e:
+            logging.error(f"❌ Ошибка при скачивании видео: {e}", exc_info=True)  # <-- Выводим всю инфу об ошибке
+            return None, f'Ошибка: {e}'
 
-    # Формируем результат
-    video_info = {
-        "title": info.get("title", "Без названия"),
-        "uploader": info.get("uploader", "Неизвестен"),
-        "view_count": info.get("view_count", "Нет данных"),
-        "duration": info.get("duration", 0),
-        "upload_date": info.get("upload_date", "Нет данных"),
-        "thumbnail": info.get("thumbnail", ""),
-        "format_id": format_info.get("format_id"),
-        "extension": format_info.get("ext"),
-        "resolution": format_info.get("resolution", "Нет данных"),
-        "vcodec": format_info.get("vcodec", "Нет данных"),
-        "acodec": format_info.get("acodec", "Нет данных"),
-        "filesize": format_info.get("filesize", "Нет данных"),
-    }
+        # Проверяем, что формат существует
+        formats = info.get("formats", [])
+        format_info = next((f for f in formats if f["format_id"] == format_id), None)
+        if not format_info:
+            raise ValueError(f"Формат с ID {format_id} не найден.")
 
-    output_file = os.path.join(DOWNLOAD_DIR, f"{title}-{resolution}{video_id}.{ext}")
-    # Проверяем, что файл существует
-    file_abs = os.path.abspath(output_file)
-    if not file_abs or not os.path.exists(file_abs):
-        raise FileNotFoundError(f"Файл {file_abs} не найден.")
-    return output_file, video_info
+        # Формируем результат
+        video_info = {
+            "title": info.get("title", "Без названия"),
+            "uploader": info.get("uploader", "Неизвестен"),
+            "view_count": info.get("view_count", "Нет данных"),
+            "duration": info.get("duration", 0),
+            "upload_date": info.get("upload_date", "Нет данных"),
+            "thumbnail": info.get("thumbnail", ""),
+            "format_id": format_info.get("format_id"),
+            "extension": format_info.get("ext"),
+            "resolution": format_info.get("resolution", "Нет данных"),
+            "vcodec": format_info.get("vcodec", "Нет данных"),
+            "acodec": format_info.get("acodec", "Нет данных"),
+            "filesize": format_info.get("filesize", "Нет данных"),
+        }
+
+        output_file = os.path.join(DOWNLOAD_DIR, f"{title}-{resolution}{video_id}.{ext}")
+        # Проверяем, что файл существует
+        file_abs = os.path.abspath(output_file)
+        if not file_abs or not os.path.exists(file_abs):
+            raise FileNotFoundError(f"Файл {file_abs} не найден.")
+        return output_file, video_info
+
+    return await asyncio.to_thread(sync_download)
 
 def get_video_info(url):
     """
@@ -218,8 +224,9 @@ def main_kb(filtered_formats, audio_id, audio_size):
                list: Список клавиш
            """
     button_list = []
+    audio_full_size = f'{round(audio_size / (1024 ** 2), 2)} MB'
     button_list.append([InlineKeyboardButton(
-        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {round(audio_size / (1024 ** 2), 2)} MB", callback_data=f"yt_audio:{audio_id}:{audio_size}")])
+        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {audio_full_size}", callback_data=f"yt_audio:{audio_id}:{audio_full_size}")])
     for f in filtered_formats:
         format_id = ['format_id']
         if format_id:

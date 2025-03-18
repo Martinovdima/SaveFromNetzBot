@@ -25,7 +25,7 @@ from yout import sanitize_filename, download_and_merge_by_format, get_video_info
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE
 from rest import YOUTUBE_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb, user_messages, delete_keyboard_message
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, main_kb_tt, create_caption
-from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video, get_format_id_from_callback
+from vk import get_vk_video_info, get_formats_vk_video, make_keyboard_vk, download_vk_video_async, get_format_id_from_callback
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -44,7 +44,7 @@ DOWNLOAD_DIR = "videos"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # session = AiohttpSession(api=TelegramAPIServer.from_base('http://localhost:8081'))
-bot = Bot(os.getenv('TOKEN'))
+bot = Bot(os.getenv('TOKEN'), timeout=120)
 dp = Dispatcher()
 
 
@@ -53,10 +53,10 @@ class VideoProcessing(StatesGroup):
     waiting_for_processing = State()
 
 
-
 @dp.message(Command(commands=['start']))
 async def start_handler(message: types.Message):
-    await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK видео или Tik Tok, и я предоставлю варианты для скачивания!")
+    await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK или Tik Tok, и я предоставлю варианты для скачивания!")
+    print(f"Используется файл cookies: {cookies_file}")
 
 @dp.message(Command(commands=['admin']))
 async def admin_handler(message: types.Message):
@@ -65,31 +65,27 @@ async def admin_handler(message: types.Message):
     await message.answer(text=f'Всего пользователей в базе {user_count}')
 
 @dp.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
-async def youtube_handler(message: types.Message):
+async def youtube_handler(message: types.Message, state: FSMContext):
     url = message.text.strip()
     user_id = message.from_user.id
     db = next(get_db())
 
-
-    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка {url}")
-
+    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка ЮТУБ {url}")
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
-
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
 
         audio_id, audio_size, title, thumbnail, info, video_id = get_video_info(url)
         title_sanitaze = sanitize_filename(title)
-        logging.info(f"Видео ID: {video_id}, Название: {title_sanitaze}")
 
         update_or_create_user(db, user_id, url, video_id, title_sanitaze)
         logging.info(f"Данные от пользователя {user_id} сохранены в базе данных")
 
         if not info:
             await message.reply(text=emoji.emojize(EMOJIS['warning']) + "Не удалось найти доступные форматы для этого видео.")
-
+            logging.info(f"Нет доступных форматов для {video_id}")
             return
 
         filtered_formats = filter_formats_by_vcodec_and_size(audio_size, info.get("formats", []), "avc1")
@@ -100,23 +96,22 @@ async def youtube_handler(message: types.Message):
         )
 
         user_messages[user_id] = msg_keyboard.message_id
-        logging.debug(f"Клавиатура сформирована и отправлена пользователю {user_id}")
+        logging.info(f"Клавиатура сформированна и отправлена пользователю {user_id}")
         await msg_info.delete()
 
     except Exception as e:
-        logging.error(f"Ошибка обработки ссылки от пользователя {user_id}: - {e}")
+        logging.error(f"ОШИБКА процесса обработки ссылки на Youtube от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
-        await bot.send_message(chat_id=user_id, text="⏳ Жду следующую ссылку....")
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         if 'msg_info' in locals():
             await msg_info.delete()
-
 
 @dp.message(lambda message: re.search(TIKTOK_REGEX, message.text, re.IGNORECASE))
 async def tiktok_handler(message: types.Message):
     url = message.text.strip()
     user_id = message.from_user.id
 
-    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка {url}")
+    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка ТИКТОК {url}")
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
@@ -126,7 +121,6 @@ async def tiktok_handler(message: types.Message):
         video_info, author, thumbnail_url, video_id = get_tiktok_video_info(url)
         format_id = get_tiktok_video_details(video_info)
         title_sanitaze = sanitize_filename(video_info['title'])
-        logging.info(f"Видео ID: {video_id},Название: {title_sanitaze}")
 
         db = next(get_db())
         update_or_create_user(db, user_id, url, video_id, title_sanitaze)
@@ -139,10 +133,10 @@ async def tiktok_handler(message: types.Message):
         )
 
         user_messages[user_id] = msg_keyboard.message_id
-        logging.debug(f"Клавиатура сформированна и отправлена пользователю {user_id}")
+        logging.info(f"Клавиатура сформирована и отправлена пользователю {user_id}")
         await msg_info.delete()
     except Exception as e:
-        logging.error(f"Ошибка процесса обработки ссылки на TikTok от пользователя {user_id}: - {e}")
+        logging.error(f"ОШИБКА процесса обработки ссылки на TikTok от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         if 'msg_info' in locals():
@@ -153,7 +147,7 @@ async def vk_video_handler(message: types.Message, state: FSMContext):
     url = message.text.strip()
     user_id = message.from_user.id
 
-    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка {url}")
+    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка ВК {url}")
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
@@ -166,7 +160,6 @@ async def vk_video_handler(message: types.Message, state: FSMContext):
         FORMAT_DICT = get_formats_vk_video(video_vk_info)
         await state.update_data(format_dict=FORMAT_DICT)
         logging.debug(f"Сохранено в state: {FORMAT_DICT}")
-        logging.info(f"Видео ID: {video_id},Название: {title_sanitaze}")
 
         db = next(get_db())
         update_or_create_user(db, user_id, url, video_id, title_sanitaze)
@@ -180,11 +173,11 @@ async def vk_video_handler(message: types.Message, state: FSMContext):
         )
 
         user_messages[user_id] = msg_keyboard.message_id
-        logging.debug(f"Клавиатура сформированна и отправлена пользователю {user_id}")
+        logging.info(f"Клавиатура сформированна и отправлена пользователю {user_id}")
         await msg_info.delete()
 
     except Exception as e:
-        logging.error(f"Ошибка процесса обработки ссылки на VK video от пользователя {user_id}: - {e}")
+        logging.error(f"ОШИБКА процесса обработки ссылки на VK video от пользователя {user_id}: - {e}")
         await message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         if 'msg_info' in locals():
@@ -194,10 +187,11 @@ async def vk_video_handler(message: types.Message, state: FSMContext):
 @dp.message()  # Этот хэндлер сработает, если ни один другой не подошёл
 async def handle_invalid_message(message: types.Message):
     user_id = message.from_user.id
-    logging.debug(f"Message received from user {user_id} ***FAILED_LINK***")
+    if delete_keyboard_message(user_id):
+        await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+        del user_messages[user_id]
+    logging.info(f"Сообщение в неправильном формате получено от пользователя {user_id} ***FAILED_LINK***")
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
-
-
 
 @dp.callback_query(lambda call: call.data.startswith('yt_video:') or call.data.startswith('yt_audio:'))
 async def download_handler(callback_query: types.CallbackQuery):
@@ -206,10 +200,11 @@ async def download_handler(callback_query: types.CallbackQuery):
     file_size_id = callback_query.data.split(':')[2]
     if is_under_2gb(file_size_id):
         await callback_query.answer("К сожалению телеграмм не позволяет скачивать файлы больше 2 Гб.", show_alert=True)
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
         return
     db = next(get_db())
 
-    logging.debug(f"Download request from {user_id}: format {format_id}")
+    logging.info(f"Пользователь на клавиатуре {user_id} выбрал формат видео {format_id}")
 
     try:
         # Изменение сообщения с клавиатурой
@@ -221,25 +216,26 @@ async def download_handler(callback_query: types.CallbackQuery):
                     caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
                     reply_markup=None
                 )
-                logging.info(f"Message updated for {user_id}")
+                logging.info(f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
             except Exception as e:
-                logging.warning(f"Error updating message for {user_id}: {e}")
+                logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
 
         # Скачивание видео
-        output_file, video_info = download_and_merge_by_format(db, user_id, format_id)
+        output_file, video_info = await download_and_merge_by_format(db, user_id, format_id)
         if output_file == None:
             await callback_query.message.reply(
                 text=emoji.emojize(EMOJIS['warning']) + "Данное видео скорее всего заблокировано в вашем регионе.",
                 disable_web_page_preview=True
             )
+            await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
             return
-        logging.info(f"Video downloaded for {user_id}: {output_file}")
+        logging.info(f"УСПЕХ: Видео для пользователя {user_id} УСПЕШНО СКАЧАНО {output_file}")
 
         # Проверка и конвертация аудио
         if callback_query.data.startswith('yt_audio'):
             if output_file.endswith('.webm'):
                 output_file = convert_webm_to_m4a(output_file)
-                logging.info(f"File converted to M4A for {user_id}: {output_file}")
+                logging.info(f"УСПЕХ: Аудио файл полученный от пользователя {user_id}: {output_file} переконвертировался в M4A")
 
         # Проверка размера файла
         file_size = os.path.getsize(output_file)
@@ -248,7 +244,9 @@ async def download_handler(callback_query: types.CallbackQuery):
                 text=emoji.emojize(EMOJIS['warning']) + "Файл больше 2 ГБ, отправка невозможна.",
                 disable_web_page_preview=True
             )
-            logging.warning(f"Fail {output_file} too large ({file_size} byte) for {user_id}")
+            logging.warning(f"ОШИБКА: {output_file} файл слишком большой ({file_size} byte) для пользователя {user_id}")
+            os.remove(output_file)
+            logging.info(f"Файл {output_file} УДАЛЕН! ")
             return
 
         # Обработка даты
@@ -280,7 +278,7 @@ async def download_handler(callback_query: types.CallbackQuery):
                 parse_mode=None,
                 supports_streaming=True
             )
-            logging.info(f"Audio sent to user {user_id}: {output_file}")
+            logging.info(f"УСПЕХ: Аудио файл отправлен пользователю {user_id}: {output_file}")
         else:
             video_file = FSInputFile(output_file)
             await callback_query.message.answer_video(
@@ -289,32 +287,33 @@ async def download_handler(callback_query: types.CallbackQuery):
                 parse_mode=None,
                 supports_streaming=True
             )
-            logging.info(f"Video sent to user {user_id}: {output_file}")
+            logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
 
         if os.path.exists(output_file):
             os.remove(output_file)
-            logging.info(f"main.py___377___File vor {user_id}: {output_file} is delete ")
+            logging.info(f"УСПЕХ: Файл {output_file} УДАЛЕН! ")
 
         # Удаление старого сообщения с клавиатурой
         if user_id in user_messages:
             try:
                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
                 del user_messages[user_id]
-                logging.info(f"Old message with keyboard deleted for {user_id}")
+                logging.info(f"УСПЕХ: Старое сообщение с клавиатурой УДАЛЕНО {user_id}")
             except Exception as e:
-                logging.warning(f"Error deleting message for {user_id}: {e}")
+                logging.warning(f"ОШИБКА:  при удалении старой клавиатуры {user_id}: {e}")
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+
     except Exception as e:
-        logging.error(f"Error downloading for {user_id}: {e}")
+        logging.error(f"ОШИБКА: файл не удалось скачать {user_id}: {e}")
 
         # Удаление сообщения при ошибке
         if user_id in user_messages:
             try:
                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
                 del user_messages[user_id]
-                logging.info(f"Message deleted after error for {user_id}")
+                logging.info(f"клавиатура удалена после ОШИБКИ скачивания файла {user_id}")
             except Exception as e:
-                logging.warning(f"Error deleting message after failure for {user_id}: {e}")
+                logging.warning(f"ОШИБКА: клавиатура не удалена после ОШИКИ при скачивании файла {user_id}: {e}")
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
 
         if callback_query.message:
@@ -335,7 +334,7 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     db = next(get_db())
 
-    logging.debug(f"Download request from {user_id}: format {format_id}")
+    logging.info(f"Пользователь на клавиатуре {user_id} выбрал формат видео {format_id}")
 
     try:
         # Попытка обновить сообщение с клавиатурой
@@ -347,19 +346,23 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
                     caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
                     reply_markup=None
                 )
-                logging.info(f"Message updated for {user_id}")
+                logging.info(f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
             except Exception as e:
-                logging.warning(f"Error updating message for {user_id}: {e}")
+                logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
 
         # Скачивание видео
-        output_file, video_info = download_tiktok_video(db, user_id, format_id)
-        logging.info(f"Video downloaded for {user_id}: {output_file}")
+        output_file, video_info = await download_tiktok_video(db, user_id, format_id)
+        if output_file is None or video_info is None:
+            logging.error("Ошибка: download_tiktok_video() вернула None!")
+            await callback_query.message.answer("⚠️ Видео недоступно или удалено. Попробуйте ещё раз.")
+            return
+        logging.info(f"УСПЕХ: Видео для пользователя {user_id} УСПЕШНО СКАЧАНО {output_file}")
 
         # Если нужно аудио, конвертируем
         if callback_query.data.startswith('tt_download_audio:'):
             if output_file.endswith('.webm'):
                 output_file = convert_webm_to_m4a(output_file)
-                logging.info(f"File converted to M4A for {user_id}: {output_file}")
+                logging.info(f"УСПЕХ: Аудио файл полученный от пользователя {user_id}: {output_file} переконвертировался в M4A")
 
         # Проверка размера файла
         file_size = os.path.getsize(output_file)
@@ -368,7 +371,10 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
                 text=emoji.emojize(EMOJIS['warning']) + "К сожалению, Telegram не позволяет отправлять файлы больше 2 ГБ.",
                 disable_web_page_preview=True
             )
-            logging.warning(f"Fail too large ({file_size} byte) for {user_id}")
+            logging.warning(f"ОШИБКА: {output_file} файл слишком большой ({file_size} byte) для пользователя {user_id}")
+            await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+            os.remove(output_file)
+            logging.info(f"Файл {output_file} УДАЛЕН! ")
             return
 
         # Формируем описание для файла
@@ -383,7 +389,7 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
                 parse_mode=None,
                 supports_streaming=True
             )
-            logging.info(f"Audio sent to user {user_id}: {output_file}")
+            logging.info(f"УСПЕХ: Аудио файл отправлен пользователю {user_id}: {output_file}")
         else:
             video_file = FSInputFile(output_file)
             await callback_query.message.answer_video(
@@ -392,36 +398,34 @@ async def tt_download_handler(callback_query: types.CallbackQuery):
                 parse_mode=None,
                 supports_streaming=True
             )
-            logging.info(f"Video sent to user {user_id}: {output_file}")
+            logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
 
         if os.path.exists(output_file):
             os.remove(output_file)
-            logging.info(f"main.py___377___File vor {user_id}: {output_file} is delete ")
+            logging.info(f"Файл{output_file} УДАЛЕН!")
 
         # Удаление старого сообщения с клавиатурой
         if user_id in user_messages:
             try:
                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
                 del user_messages[user_id]
-                logging.info(f"Old message with keyboard deleted for {user_id}")
+                logging.info(f"УСПЕХ: Старое сообщение с клавиатурой УДАЛЕНО {user_id}")
             except Exception as e:
-                logging.warning(f"Error deleting message for {user_id}: {e}")
+                logging.warning(f"ОШИБКА: при удалении клавиатуры у {user_id}: {e}")
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
 
     except Exception as e:
-        logging.error(f"Error downloading for {user_id}: {e}")
+        logging.error(f"ОШИБКА: при скачивании файла у {user_id}: {e}")
 
         # Удаление старого сообщения при ошибке
         if user_id in user_messages:
             try:
                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
                 del user_messages[user_id]
-                logging.info(f"Message deleted after error for {user_id}")
+                logging.info(f"Старое сообщение с клавиатурой УДАЛЕНО {user_id}")
             except Exception as e:
-                logging.warning(f"Error deleting message after failure for {user_id}: {e}")
-
+                logging.warning(f"ОШИБКА: при удалении клавиатуры у {user_id}: {e}")
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
-
 
         if callback_query.message:
             try:
@@ -442,6 +446,8 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
         return
     user_id = callback_query.from_user.id
     db = next(get_db())
+
+    logging.info(f"Пользователь на клавиатуре {user_id} выбрал формат видео {format_id}")
     try:
         if user_id in user_messages:
             try:
@@ -451,22 +457,34 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                     caption=emoji.emojize(EMOJIS['download']) + ' Скачивание началось...',
                     reply_markup=None  # Убираем клавиатуру
                 )
+                logging.info(f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
             except Exception as e:
-                logging.warning(f"Ошибка при изменении сообщения: {e}")
+                logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
 
         # Скачиваем и объединяем файл
-        output_file, video_info = download_vk_video(db, user_id, format_id)
+        output_file, video_info = await download_vk_video_async(db, user_id, format_id)
+        if output_file is None or video_info is None:
+            logging.error("Ошибка: download_vk_video() вернула None!")
+            await callback_query.message.answer("⚠️ Видео недоступно или удалено. Попробуйте ещё раз.")
+            return
+        logging.info(f"УСПЕХ: Видео для пользователя {user_id} УСПЕШНО СКАЧАНО {output_file}")
 
         if callback_query.data.split(':')[0] == 'vk_audio:':
             if output_file.endswith('.webm'):
                 output_path = convert_webm_to_m4a(output_file)
                 output_file = output_path
+                logging.info(
+                    f"УСПЕХ: Аудио файл полученный от пользователя {user_id}: {output_file} переконвертировался в M4A")
 
 
         # Проверка размера файла
         file_size = os.path.getsize(output_file)
         if file_size > 2 * 1024 * 1024 * 1024:  # 2 GB
             await callback_query.message.reply(text=emoji.emojize(EMOJIS['warning']) + "К сожалению, Telegram не позволяет отправлять файлы больше 2 ГБ.", disable_web_page_preview=True)
+            await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+            logging.warning(f"ОШИБКА: {output_file} файл слишком большой ({file_size} byte) для пользователя {user_id}")
+            os.remove(output_file)
+            logging.info(f"Файл {output_file} УДАЛЕН! ")
             return
 
 
@@ -513,32 +531,39 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                 parse_mode=None,  # Обязательно для работы ссылок
                 supports_streaming=True  # Указывает, что видео можно смотреть в потоковом режиме
             )
+            logging.info(f"УСПЕХ: Аудио файл отправлен пользователю {user_id}: {output_file}")
         else:
-            # Выгружаем видео в телеграмм
             video_file = FSInputFile(output_file)
+            if user_id in user_messages:
+                await bot.edit_message_caption(
+                    chat_id=callback_query.message.chat.id,
+                    message_id=user_messages[user_id],  # Используем ID сохраненного сообщения
+                    caption=emoji.emojize(EMOJIS['download']) + ' Идет загрузка в Телеграмм...',
+                )
             await callback_query.message.answer_video(
                 video=video_file,
                 caption=caption_v,
-                parse_mode=None,
-                supports_streaming=True
+                parse_mode=None,  # Обязательно для работы ссылок
+                supports_streaming=True  # Указывает, что видео можно смотреть в потоковом режиме
             )
+            logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
 
         if os.path.exists(output_file):
             os.remove(output_file)
-            logging.info(f"main.py___491___File vor {user_id}: {output_file} is delete ")
+            logging.info(f"Файл {output_file} УДАЛЕН!")
 
         # После завершения скачивания удаляем старое сообщение с клавиатурой
         if user_id in user_messages:
             try:
                 await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
                 del user_messages[user_id]  # Удаляем ID сообщения после удаления
+                logging.info(f"УСПЕХ: Старое сообщение с клавиатурой УДАЛЕНО {user_id}")
             except Exception as e:
-                logging.warning(f"Ошибка при удалении сообщения: {e}")
-
+                logging.warning(f"Ошибка при удалении сообщения с клавиатурой {user_id} : {e}")
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
 
     except Exception as e:
-        logging.warning(f"Не удалось скачать файл: {e}")
+        logging.warning(f"ОШИБКА: при скачивании файла: {e}")
         # После завершения скачивания удаляем старое сообщение с клавиатурой
         if user_id in user_messages:
             try:
@@ -547,7 +572,6 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
             except Exception as e:
                 logging.warning(f"Ошибка при удалении сообщения: {e}")
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
-
         if callback_query.message:
             try:
                 await callback_query.message.reply_photo(photo=ERROR_IMAGE, caption=ERROR_TEXT)
@@ -560,5 +584,5 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    loop.create_task(dp.start_polling(bot, skip_updates=True))
+    loop.create_task(dp.start_polling(bot, skip_updates=True, polling_timeout=120))
     loop.run_forever()

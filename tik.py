@@ -2,6 +2,7 @@ from yt_dlp import YoutubeDL
 import os
 import emoji
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+import asyncio
 
 from sqlalchemy.orm import Session
 from db import User
@@ -38,34 +39,36 @@ def main_kb_tt(formats):
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)
     return keyboard
 
-def download_tiktok_video(db: Session, user_id: int, format_id):
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user or not user.url:
-        raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
+async def download_tiktok_video(db: Session, user_id: int, format_id):
+    def sync_download():
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user or not user.url:
+            raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
 
-    url = user.url
-    title = user.title
-    video_id = user.video_id
+        url = user.url
+        title = user.title
+        video_id = user.video_id
 
-    ydl_opts = {
-        'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}_%(resolution)s{video_id}.%(ext)s"),  # Формат имени файла
-        'merge_output_format': 'mp4',  # Принудительное объединение в MP4
-        'quiet': False,  # Выводит процесс загрузки
-        'noplaylist': True,  # Загружает только одно видео
-    }
+        ydl_opts = {
+            'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
+            'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}_%(resolution)s{video_id}.%(ext)s"),  # Формат имени файла
+            'merge_output_format': 'mp4',  # Принудительное объединение в MP4
+            'quiet': False,  # Выводит процесс загрузки
+            'noplaylist': True,  # Загружает только одно видео
+        }
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)  # Загружаем видео
-            resolution = info.get('resolution', 'unknow')
-            ext = info.get('ext', 'mp4')  # Если не найдено расширение, по умолчанию 'mkv'
-            file_path = os.path.join(DOWNLOAD_DIR, f"{title}_{resolution}{video_id}.{ext}")
-            return file_path, info if os.path.exists(file_path) else None
-    except Exception as e:
-        print(f"Ошибка при скачивании: {e}")
-        return None
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)  # Загружаем видео
+                resolution = info.get('resolution', 'unknow')
+                ext = info.get('ext', 'mp4')  # Если не найдено расширение, по умолчанию 'mkv'
+                file_path = os.path.join(DOWNLOAD_DIR, f"{title}_{resolution}{video_id}.{ext}")
+                return file_path, info if os.path.exists(file_path) else None
+        except Exception as e:
+            print(f"Ошибка при скачивании: {e}")
+            return None
 
+    return await asyncio.to_thread(sync_download)
 def get_tiktok_video_details(info):
     """Возвращает список словарей с форматами видео, исключая дубликаты разрешений"""
 

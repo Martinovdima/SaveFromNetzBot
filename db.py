@@ -12,7 +12,7 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, unique=True, index=True)  # Telegram user_id
-    video_id = Column(Integer, unique=True, index=True) # id видео из источника
+    video_id = Column(Integer, unique=False, index=True) # id видео из источника
     url = Column(String, nullable=True)  # Последняя отправленная ссылка
     title = Column(String, nullable=True) # Последнее название файла
     resolutions = Column(String, nullable=True)  # Расширение
