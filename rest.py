@@ -3,8 +3,8 @@ import re
 import surrogates
 from aiogram.types import FSInputFile
 
-
 import logging
+
 
 def make_a_folders():
     DOWNLOAD_DIR = "videos"
@@ -32,7 +32,6 @@ def delete_keyboard_message(user_id: int):
         except Exception as e:
             logging.warning(f"Ошибка удаления сообщения с клавиатурой {user_id}: {e}")
             return False
-
 
 # Список эмодзи для отображения информации
 EMOJIS = {

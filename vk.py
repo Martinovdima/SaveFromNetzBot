@@ -4,26 +4,26 @@ import emoji
 import os
 import asyncio
 
-
 from sqlalchemy.orm import Session
 from db import User
 from rest import EMOJIS, DOWNLOAD_DIR
 
+
 def get_vk_video_info(url):
     """
-    Получает информацию о видео с VK с помощью yt-dlp.
+        Получает информацию о видео с VK с помощью yt-dlp.
 
-    Args:
-        url (str): Ссылка на видео.
+        Args:
+            url (str): Ссылка на видео.
 
-    Returns:
-        tuple: Кортеж, содержащий:
-            - dict: Полная информация о видео.
-            - str: Автор видео.
-            - str: Ссылка на миниатюру (обложку).
-            - str: ID видео.
-            - int | None: Длительность видео в секундах или None, если не указано.
-    """
+        Returns:
+            tuple: Кортеж, содержащий:
+                - dict: Полная информация о видео.
+                - str: Автор видео.
+                - str: Ссылка на миниатюру (обложку).
+                - str: ID видео.
+                - int | None: Длительность видео в секундах или None, если не указано.
+        """
     ydl_opts = {
         'quiet': True,  # Отключает лишние логи
         'noplaylist': True,  # Загружает только одно видео
@@ -33,6 +33,8 @@ def get_vk_video_info(url):
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)  # Только получаем данные, без скачивания
 
+
+    duration = info.get('duration', None)
     duration = info.get('duration', None)
     video_id = info.get("id", "Неизвестно")
     author = info.get("uploader", "Неизвестно")
@@ -43,24 +45,23 @@ def get_vk_video_info(url):
 
 def get_formats_vk_video(video_info):
     """
-    Извлекает и фильтрует доступные форматы видео и аудио из информации о видео VK.
+        Извлекает и фильтрует доступные форматы видео и аудио из информации о видео VK.
 
-    Args:
-        video_info (dict): Словарь с информацией о видео, полученный из yt-dlp.
+        Args:
+            video_info (dict): Словарь с информацией о видео, полученный из yt-dlp.
 
-    Returns:
-        dict[int, list]: Словарь форматов с номерами от 1, где:
-            - format_id (str): Уникальный идентификатор формата.
-            - ext (str): Расширение файла (например, "mp4").
-            - width (int | None): Ширина видео или None (если аудиофайл).
-            - height (int | None): Высота видео или None (если аудиофайл).
-            - filesize (int | str): Размер файла в байтах или "Неизвестно".
-            - tbr (float | str): Средний битрейт в кбит/с или "Неизвестно".
-    """
+        Returns:
+            dict[int, list]: Словарь форматов с номерами от 1, где:
+                - format_id (str): Уникальный идентификатор формата.
+                - ext (str): Расширение файла (например, "mp4").
+                - width (int | None): Ширина видео или None (если аудиофайл).
+                - height (int | None): Высота видео или None (если аудиофайл).
+                - filesize (int | str): Размер файла в байтах или "Неизвестно".
+                - tbr (float | str): Средний битрейт в кбит/с или "Неизвестно".
+        """
     formats = video_info.get("formats", [])
-
-    unique_resolutions = {}  # Словарь для хранения уникальных видео-форматов
-    best_audio = None  # Лучший аудиоформат
+    unique_resolutions = {}  # Словарь для хранения уникальных форматов
+    best_audio = None
 
     # Находим лучший аудиоформат (наибольший abr)
     for f in formats:
@@ -109,48 +110,6 @@ def get_formats_vk_video(video_info):
     return result
 
 
-def make_keyboard_vk(formats_dict, duration):
-    """
-    Создаёт клавиатуру с кнопками для скачивания аудио и видео из VK.
-
-    Args:
-        formats_dict (dict[int, list]): Словарь форматов, где ключ — номер формата,
-                                        значение — список с одним словарем (формат видео/аудио).
-        duration (int | None): Длительность видео в секундах или None, если неизвестно.
-
-    Returns:
-        InlineKeyboardMarkup: Объект клавиатуры с кнопками загрузки.
-    """
-    button_list = []
-
-    for num, format_list in formats_dict.items():
-        f = format_list[0]  # Достаём единственный элемент списка
-
-        resolution_text = "Аудио" if f.get(
-            "width") is None else f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}"
-
-        # Проверяем, есть ли 'tbr' и 'duration'
-        if 'tbr' in f and isinstance(f['tbr'], (int, float)) and duration:
-            # Рассчитываем размер файла
-            file_size = (f['tbr'] * duration) / (8 * 1024)  # в МБ
-            size_text = f"{round(file_size, 2)} MB"
-        else:
-            # Если данных недостаточно, выводим "Неизвестно"
-            size_text = "Неизвестно"
-
-        # Определяем тип callback
-        callback_type = "vk_audio" if resolution_text == "Аудио" else "vk_video"
-
-        button_list.append([
-            InlineKeyboardButton(
-                text=f"Скачать {emoji.emojize(EMOJIS['sound'] if resolution_text == 'Аудио' else EMOJIS['resolutions'])} {resolution_text} {emoji.emojize(EMOJIS['size'])} {size_text}",
-                callback_data=f"{callback_type}:{num}:{size_text}"  # Используем номер формата
-            )
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=button_list)
-
-
 async def download_vk_video_async(db: Session, user_id: int, format_id):
     """
     Асинхронно загружает видео с VK с помощью yt-dlp.
@@ -168,7 +127,7 @@ async def download_vk_video_async(db: Session, user_id: int, format_id):
     """
 
     def sync_download():
-        ffmpeg_path = os.path.abspath("ffmpeg/bin/ffmpeg.exe")
+        ffmpeg_path = os.path.abspath("/usr/bin/ffmpeg")
         os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
         """Синхронная функция для скачивания видео (запускается в отдельном потоке)."""
         user = db.query(User).filter(User.user_id == user_id).first()
@@ -229,7 +188,3 @@ def get_format_id_from_callback(callback_data, formats_dict):
         pass  # Если callback_data невалидный, просто возвращаем "Неизвестно"
 
     return "Неизвестно"
-
-
-
-

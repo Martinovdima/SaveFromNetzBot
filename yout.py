@@ -1,24 +1,25 @@
+from sqlalchemy.orm import Session
+from config import ffmpeg_path
+from rest import DOWNLOAD_DIR
+from yt_dlp import YoutubeDL
+from db import User
+
+import subprocess
+import asyncio
 import logging
 import os
 import re
 
-import emoji
-import subprocess
-import asyncio
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from yt_dlp import YoutubeDL, utils
-from db import User
-from sqlalchemy.orm import Session
+cookies_file = os.path.abspath("cookies.txt")
 
-from rest import EMOJIS, DOWNLOAD_DIR
 
-def sanitize_filename(filename):
+async def sanitize_filename(filename):
     """
         Удаляет недопустимые символы из имени файла и пути для совместимости с файловой системой.
 
         Args:
-            filename (str): Имя файла в виде строки
+            filename: Имя файла в виде строки
 
         Returns:
             str: Отформатированную строку.
@@ -28,6 +29,7 @@ def sanitize_filename(filename):
     # Заменяем недопустимые символы на "_"
     sanitized = re.sub(r'[@<>:"/\\|?*]', '_', text)
     return re.sub(r"\s+", " ", sanitized).strip()
+
 
 async def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> str:
     """
@@ -43,7 +45,6 @@ async def download_and_merge_by_format(db: Session, user_id: int, format_id: str
     """
 
     def sync_download():
-        ffmpeg_path = os.path.abspath("ffmpeg/bin/ffmpeg.exe")
         os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
         # Получаем URL пользователя из базы данных
         user = db.query(User).filter(User.user_id == user_id).first()
@@ -57,14 +58,16 @@ async def download_and_merge_by_format(db: Session, user_id: int, format_id: str
         ydl_opts = {
             'cookiefile': "cookies.txt",
             'verbose': True,
-            'format': f"{format_id}+bestaudio/best",  # Скачивание видео и аудио
+            'format': f"{format_id}+bestaudio/best",
+            'merge_output_format': 'mp4',
             'outtmpl': os.path.join(DOWNLOAD_DIR, f"{title}-%(resolution)s{video_id}.%(ext)s"),  # Имя файлов
             'ffmpeg_location': ffmpeg_path,
             'socket_timeout': 60,
             'retries': 5,
             'nocheckcertificate': True,
             'postprocessors': [],  # Отключаем автоматическое объединение
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)\
+                                                                            Chrome/120.0.0.0 Safari/537.36',
             'extractor_args': {
                 'youtube': {
                     'formats': 'missing_pot'
@@ -120,7 +123,8 @@ async def download_and_merge_by_format(db: Session, user_id: int, format_id: str
 
     return await asyncio.to_thread(sync_download)
 
-def get_video_info(url):
+
+async def get_video_info(url):
     """
     Получает информацию о видео из YouTube с помощью yt-dlp.
 
@@ -141,14 +145,17 @@ def get_video_info(url):
         'cookiefile': "cookies.txt",
         'verbose': True,
         'noplaylist': True,  # Только одно видео
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)\
+                                                                        Chrome/120.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
                 'formats': 'missing_pot'
             }
         }
     }
+
     with YoutubeDL(ydl_opts) as ydl:
+
         info = ydl.extract_info(url, download=False)
 
         # id видео
@@ -171,72 +178,44 @@ def get_video_info(url):
         if audio_formats:
             best_audio = max(audio_formats, key=lambda f: f['filesize'])
 
+        # with open("video_info.json", "w", encoding="utf-8") as f:
+        #     json.dump(info, f, indent=4, ensure_ascii=False)
+
         return best_audio['format_id'], best_audio['filesize'], title, thumbnail, info, video_id
 
-def filter_formats_by_vcodec_and_size(audio, formats, vcodec_prefix="avc1"):
-    """
-    Фильтрует список форматов по префиксу видеокодека и наличию размера файла.
 
-    Args:
-        formats (list): Список форматов, полученный из yt-dlp.
-        vcodec_prefix (str): Префикс видеокодека для фильтрации (например, "avc1").
-
-    Returns:
-        list: Список форматов, где видеокодек начинается с заданного префикса и указан размер файла.
+async def filter_best_formats(formats):
     """
-    filtered_formats = []
-    if isinstance(audio, (int, float)):
-        audio_size = audio
-    else:
-        audio_size = 0
+    Фильтрует список форматов, оставляя только один лучший формат на каждое разрешение.
+    Убирает форматы без размера файла и без видеокодека.
+    """
+    best_formats = {}
 
     for f in formats:
-        vcodec = f.get("vcodec", "")
-        filesize = f.get("filesize", None)
-        if vcodec.startswith(vcodec_prefix) and filesize:  # Проверяем, начинается ли vcodec с "avc1" и есть ли размер
-            format_id = f.get("format_id", "N/A")
-            ext = f.get("ext", "N/A")
-            resolution = f.get("resolution", f"{f.get('width', 'N/A')}x{f.get('height', 'N/A')}")
-            total_size = filesize + audio_size
-            filesize_str = f"{round(total_size / (1024 ** 2), 2)} MB"  # Преобразуем размер в MB
+        resolution = f"{f.get('width', 'N/A')}x{f.get('height', 'N/A')}"
+        vcodec = f.get("vcodec", "unknown")
+        filesize = f.get("filesize", 0)  # Размер в байтах
+        bitrate = f.get("tbr", 0)  # Битрейт в kbps
 
-            # Сохраняем формат с подробной информацией
-            filtered_formats.append({
-                "format_id": format_id,
-                "extension": ext,
+        # Пропускаем форматы без размера файла или без видеокодека
+        if not filesize or vcodec == "none":
+            continue
+
+        # Если такого разрешения еще нет в словаре — добавляем
+        if resolution not in best_formats or bitrate > best_formats[resolution]["tbr"]:
+            best_formats[resolution] = {
+                "format_id": f.get("format_id", "N/A"),
+                "extension": f.get("ext", "N/A"),
                 "resolution": resolution,
                 "vcodec": vcodec,
-                "filesize": filesize_str,
-            })
+                "filesize": f"{round(filesize / (1024 ** 2), 2)} MB",
+                "tbr": bitrate
+            }
 
-    return filtered_formats
+    return list(best_formats.values())
 
-def main_kb(filtered_formats, audio_id, audio_size):
-    """
-           Формирует клавиатуру из списка форматов
 
-           Args:
-               filtered_formats (list): Список доступных форматов видео
-               audio_id (str): ID аудио файла
-               audio_size (str): Размер аудио файла
-
-           Returns:
-               list: Список клавиш
-           """
-    button_list = []
-    audio_full_size = f'{round(audio_size / (1024 ** 2), 2)} MB'
-    button_list.append([InlineKeyboardButton(
-        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {audio_full_size}", callback_data=f"yt_audio:{audio_id}:{audio_full_size}")])
-    for f in filtered_formats:
-        format_id = ['format_id']
-        if format_id:
-            callback_data = f"yt_video:{f['format_id']}:{f['filesize']}"
-            button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}", callback_data=callback_data)])
-    # Создаем клавиатуру с кнопками
-    keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)
-    return keyboard
-
-def convert_webm_to_m4a(input_file: str) -> str:
+async def convert_webm_to_m4a(input_file: str) -> str:
     """
     Конвертирует webm в m4a, удаляет исходный файл и возвращает путь к новому файлу.
 
@@ -267,3 +246,20 @@ def convert_webm_to_m4a(input_file: str) -> str:
     except subprocess.CalledProcessError as e:
         print(f"Ошибка при конвертации: {e}")
         return ""
+
+
+async def filter_unique_formats(formats):
+    """
+    Убирает дубликаты форматов с одинаковыми разрешением и кодеком, оставляя наибольший размер.
+    """
+    unique_formats = {}
+
+    for f in formats:
+        resolution = f.get("resolution", f"{f.get('width', 'N/A')}x{f.get('height', 'N/A')}")
+        vcodec = f.get("vcodec", "none")
+        key = (resolution, vcodec)  # Используем разрешение и кодек как ключ
+
+        if key not in unique_formats or f.get("filesize", 0) > unique_formats[key].get("filesize", 0):
+            unique_formats[key] = f
+
+    return list(unique_formats.values())  # Возвращаем список без дубликатов

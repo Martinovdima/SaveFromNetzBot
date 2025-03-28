@@ -1,13 +1,17 @@
-from yt_dlp import YoutubeDL
-import os
-import emoji
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-import asyncio
-
-from sqlalchemy.orm import Session
-from db import User
-
 from rest import DOWNLOAD_DIR, EMOJIS
+from sqlalchemy.orm import Session
+from yt_dlp import YoutubeDL
+from db import User
+import asyncio
+import emoji
+import os
+
+
+
+
+
+
+
 
 
 def get_tiktok_video_info(url):
@@ -29,15 +33,6 @@ def get_tiktok_video_info(url):
 
     return info, author, thumbnail_url, video_id
 
-def main_kb_tt(formats):
-    button_list = []
-
-    for f in formats:
-        button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} {emoji.emojize(EMOJIS['size'])}  {f['size']}", callback_data=f"tt_download:{f['id']}:{f['size']}")])
-
-    # Создаем клавиатуру с кнопками
-    keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)
-    return keyboard
 
 async def download_tiktok_video(db: Session, user_id: int, format_id):
     def sync_download():
@@ -67,8 +62,10 @@ async def download_tiktok_video(db: Session, user_id: int, format_id):
         except Exception as e:
             print(f"Ошибка при скачивании: {e}")
             return None
-
+    # Запускаем синхронную загрузку в отдельном потоке
     return await asyncio.to_thread(sync_download)
+
+
 def get_tiktok_video_details(info):
     """Возвращает список словарей с форматами видео, исключая дубликаты разрешений"""
 
