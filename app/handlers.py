@@ -1,5 +1,5 @@
 from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE, YOUTUBE_REGEX, TIKTOK_REGEX,\
-                                    INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb, user_messages, delete_keyboard_message
+                                    INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb, user_messages, delete_keyboard_message, is_playlist_url
 from yout import sanitize_filename, get_video_info, filter_best_formats, convert_webm_to_m4a,\
                                                                                 download_and_merge_by_format
 from vk import get_vk_video_info, get_formats_vk_video, download_vk_video_async, get_format_id_from_callback
@@ -57,6 +57,11 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
+    if is_playlist_url(url):
+        await message.answer(text='Эта ссылка содержит плейлист! Скачивание плейлиста на данный момент не возможно!')
+        await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
+        return
+
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
 

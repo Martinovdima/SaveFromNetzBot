@@ -4,7 +4,12 @@ import surrogates
 from aiogram.types import FSInputFile
 
 import logging
+from urllib.parse import urlparse, parse_qs
 
+def is_playlist_url(url):
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+    return 'list' in query_params  # Если есть параметр 'list', это плейлист
 
 def make_a_folders():
     DOWNLOAD_DIR = "videos"
