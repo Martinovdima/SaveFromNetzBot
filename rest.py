@@ -2,9 +2,9 @@ import os
 import re
 import surrogates
 from aiogram.types import FSInputFile
+from urllib.parse import urlparse, parse_qs
 
 import logging
-from urllib.parse import urlparse, parse_qs
 
 def is_playlist_url(url):
     parsed_url = urlparse(url)
@@ -15,6 +15,7 @@ def make_a_folders():
     DOWNLOAD_DIR = "videos"
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     return DOWNLOAD_DIR
+
 
 def is_under_2gb(size_str):
     match = re.search(r"([\d.]+)\s*(MB|GB)", size_str, re.IGNORECASE)  # Извлекаем число и единицу измерения
@@ -28,6 +29,7 @@ def is_under_2gb(size_str):
         size *= 1024  # Переводим гигабайты в мегабайты
 
     return size >= 2048  # Проверяем, не больше ли 2 ГБ
+
 
 def delete_keyboard_message(user_id: int):
     if user_id in user_messages:
@@ -63,7 +65,8 @@ START_IMAGE = FSInputFile(os.path.abspath("images/start_hello.webp"))
 ERROR_TEXT = f"Что-то пошло не так, попробуйте позже..."
 
 # Регулярные выражения для поиска ссылок
-YOUTUBE_REGEX = r"(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/\S+"
+YOUTUBE_REGEX = r"(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w\-]+"
+YOUTUBE_CHANNEL_REGEX = r"(?:https?:\/\/)?(?:www\.)?youtube\.com\/(channel|c|user)\/[a-zA-Z0-9_-]+"
 TIKTOK_REGEX = r"(https?:\/\/)?(www\.)?(tiktok\.com)\/\S+"
 VK_VIDEO_REGEX = r"(https?://)?(www\.)?(vk\.com|vkvideo\.ru)/video[-\d]+_\d+"
 

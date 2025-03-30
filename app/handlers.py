@@ -1,18 +1,22 @@
-from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE, YOUTUBE_REGEX, TIKTOK_REGEX,\
-                                    INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb, user_messages, delete_keyboard_message, is_playlist_url
+from rest import EMOJIS, ERROR_TEXT, ERROR_IMAGE, LOAD_IMAGE, START_IMAGE, FAILS_IMAGE, YOUTUBE_REGEX,\
+                        YOUTUBE_CHANNEL_REGEX, TIKTOK_REGEX, INFO_MESSAGE, VK_VIDEO_REGEX, is_under_2gb,\
+                                                                    user_messages, delete_keyboard_message, is_playlist_url
 from yout import sanitize_filename, get_video_info, filter_best_formats, convert_webm_to_m4a,\
-                                                                                download_and_merge_by_format
+                                                              download_and_merge_by_format
 from vk import get_vk_video_info, get_formats_vk_video, download_vk_video_async, get_format_id_from_callback
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, create_caption
-from app.keyboards import main_kb, make_keyboard_vk, main_kb_tt
+from app.keyboards import main_kb, make_keyboard_vk, main_kb_tt, find_yt_kb, all_videos_channel
 from db import get_db, update_or_create_user, count_users
+from app.states import DownloadState
 from aiogram import Router, Bot, types, exceptions
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
-from aiogram.types import FSInputFile
-from app.states import DownloadState
+from app.function import search_youtube, get_channel_info, get_channel_videos
+from aiogram.types import FSInputFile, InlineQuery
 from aiogram.filters import Command
 from datetime import datetime
+from aiogram.types import InlineQueryResultVideo, InputTextMessageContent
+
 
 from dotenv import load_dotenv
 from config import logging
@@ -24,6 +28,8 @@ import os
 
 
 router = Router()
+
+state_storage = {}
 
 sys.stdout.reconfigure(encoding='utf-8')
 load_dotenv()
@@ -37,7 +43,7 @@ async def block_messages(message: types.Message):
 @router.message(CommandStart())
 async def start_handler(message: types.Message):
     await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK или Tik Tok, и\
-                                                            я предоставлю варианты для скачивания!")
+                                я предоставлю варианты для скачивания!", reply_markup=find_yt_kb)
 
 
 @router.message(Command("admin"))
@@ -45,6 +51,29 @@ async def admin_handler(message: types.Message):
     db = next(get_db())  # Получаем сессию БД
     user_count = count_users(db)
     await message.answer(text=f'Всего пользователей в базе {user_count}')
+
+
+@router.message(lambda message: re.search(YOUTUBE_CHANNEL_REGEX, message.text, re.IGNORECASE))
+async def youtube_channel_handler(message: types.Message, state: FSMContext, bot: Bot):
+    url = message.text.strip()
+    user_id = message.from_user.id
+    db = next(get_db())
+
+    logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка на ЮТУБ канал {url}")
+    if delete_keyboard_message(user_id):
+        await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
+        del user_messages[user_id]
+    channel_id, channel_name, channel_avatar, subscribers_count, video_count = await get_channel_info(url)
+    print(channel_id)
+
+    all_videos_channel_kb = all_videos_channel(channel_id)
+    print(all_videos_channel_kb)
+    await message.reply_photo(
+        channel_avatar,
+        caption=f"{emoji.emojize(EMOJIS['tv'])} {channel_name}\n\n {emoji.emojize(EMOJIS['autor'])} Подписчики: {subscribers_count}\
+                                                                \n {emoji.emojize(EMOJIS['resolutions'])} Видео: {video_count}",
+        reply_markup=all_videos_channel_kb
+    )
 
 
 @router.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
@@ -57,6 +86,7 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
+
     if is_playlist_url(url):
         await message.answer(text='Эта ссылка содержит плейлист! Скачивание плейлиста на данный момент не возможно!')
         await bot.send_message(chat_id=user_id, text=f'\n\n Жду следующую ссылку.... \n\n')
@@ -275,14 +305,18 @@ async def download_handler(callback_query: types.CallbackQuery, bot:Bot, state: 
                 )
                 logging.info(f"УСПЕХ: Аудио файл отправлен пользователю {user_id}: {output_file}")
             else:
-                video_file = FSInputFile(output_file)
-                await callback_query.message.answer_video(
-                    video=video_file,
-                    caption=caption,
-                    parse_mode=None,
-                    supports_streaming=True
-                )
-                logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
+                try:
+                    video_file = FSInputFile(output_file)
+                    await callback_query.message.answer_video(
+                        video=video_file,
+                        caption=caption,
+                        parse_mode=None,
+                        supports_streaming=True,
+                        timeout=900
+                    )
+                    logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
+                except Exception as e:
+                    logging.error(f"ОШИБКА: файл не удалось ОТПРАВИТЬ {user_id}: {e}")
 
             if os.path.exists(output_file):
                 os.remove(output_file)
@@ -585,6 +619,62 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
         await state.clear()
 
 
+@router.inline_query()
+async def inline_query_handler(query: types.InlineQuery):
+    query_text = query.query.strip()
+
+    # Проверяем, запрошен ли список всех видео с канала (по ID)
+    if query_text.startswith("channel_id_"):
+        channel_id = query_text.replace("channel_id_", "").strip()
+        videos_data = await get_channel_videos(channel_id)
+
+        if not videos_data or "videos" not in videos_data:
+            await query.answer([], cache_time=5, switch_pm_text="Видео не найдены", switch_pm_parameter="start")
+            return
+
+        videos = videos_data["videos"]
+        results = []
+
+        for video in videos[:20]:  # Ограничиваем выдачу 20 видео
+            results.append(
+                InlineQueryResultVideo(
+                    id=video["id"],
+                    title=video["title"],
+                    video_url=video["url"],
+                    mime_type="video/mp4",
+                    thumbnail_url=video["thumbnail"],
+                    description=f"Видео с канала {videos_data['channel_name']}",
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"{video['url']}"
+                    )
+                )
+            )
+
+        await query.answer(results, cache_time=5)
+        return
+
+    # Обычный поиск по YouTube (каналы + видео)
+    offset = query.offset or ""
+    results, next_offset = await search_youtube(query_text, offset)
+
+    if results:
+        await query.answer(results, cache_time=5, next_offset=next_offset)
+    else:
+        await query.answer([], cache_time=5, switch_pm_text="Видео не найдено", switch_pm_parameter="start")
 
 
+# @router.inline_query()
+# async def inline_query_handler(query: types.InlineQuery):
+#     query_text = query.query.strip()
+#     if not query_text:
+#         return
+#
+#     offset = query.offset or ""
+#
+#     results, next_offset = await search_youtube(query_text, offset)
+#
+#     if results:
+#         await query.answer(results, cache_time=5, next_offset=next_offset)
+#     else:
+#         await query.answer([], cache_time=5, switch_pm_text="Видео не найдено", switch_pm_parameter="start")
 

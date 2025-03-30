@@ -2,6 +2,16 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from rest import EMOJIS
 import emoji
 
+find_yt_kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🔍 Поиск на YouTube", switch_inline_query_current_chat="")]
+])
+
+
+def all_videos_channel(id_channel):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        #[InlineKeyboardButton(text="✅ Подписаться", callback_data="subcribe")],
+        [InlineKeyboardButton(text="🔍 Все видео с канала", switch_inline_query_current_chat=f"channel_id_{id_channel}")]
+    ])
 
 
 async def main_kb(filtered_formats, audio_id, audio_size) -> InlineKeyboardMarkup:
@@ -70,7 +80,9 @@ async def main_kb_tt(formats):
     button_list = []
 
     for f in formats:
-        button_list.append([InlineKeyboardButton(text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} {emoji.emojize(EMOJIS['size'])}  {f['size']}", callback_data=f"tt_download:{f['id']}:{f['size']}")])
+        button_list.append([InlineKeyboardButton(
+            text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} {emoji.emojize(EMOJIS['size'])}  {f['size']}",
+            callback_data=f"tt_download:{f['id']}:{f['size']}")])
 
     # Создаем клавиатуру с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)

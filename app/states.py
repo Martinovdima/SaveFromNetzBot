@@ -7,3 +7,4 @@ class VideoProcessing(StatesGroup):
 
 class DownloadState(StatesGroup):
     downloading = State()
+
