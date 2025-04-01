@@ -27,6 +27,8 @@ import re
 import os
 
 
+from database import create_user, create_channel, create_video, create_info, create_file, get_info_id
+
 router = Router()
 
 state_storage = {}
@@ -80,6 +82,7 @@ async def youtube_channel_handler(message: types.Message, state: FSMContext, bot
 async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
     url = message.text.strip()
     user_id = message.from_user.id
+    username = message.from_user.username
     db = next(get_db())
 
     logging.debug(f"Получено сообщение от пользователя {user_id}: ссылка ЮТУБ {url}")
@@ -95,8 +98,13 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
 
-        audio_id, audio_size, title, thumbnail, info, video_id = await get_video_info(url)
+        user = await create_user(telegram_id=user_id, username=username, api=username)
+
+        audio_id, audio_size, title, thumbnail, info, video_id, channel_id, channel_name = await get_video_info(url)
         title_sanitaze = await sanitize_filename(title)
+
+        channel = await create_channel(channel_id, channel_name)
+        video = await create_video(youtube_id=video_id, name=title_sanitaze, author=channel_name, url=url, channel_id=channel, time=info.get("duration"), date=info.get("upload_date"))
 
         update_or_create_user(db, user_id, url, video_id, title_sanitaze)
         logging.info(f"Данные от пользователя {user_id} сохранены в базе данных")
@@ -106,11 +114,14 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
             logging.info(f"Нет доступных форматов для {video_id}")
             return
 
-        filtered_formats = await filter_best_formats(info.get("formats", []))
+        filtered_formats = await filter_best_formats(info.get("formats", []), video_id)
+        await create_info(video_id=video, format_id=audio_id, type='Audio', size=f'{round(audio_size / (1024 ** 2), 2)} MB')
+        for f in filtered_formats:
+            await create_info(video_id=video, format_id=f['format_id'], type='Video', resolution=f['resolution'], size=f['filesize'])
         msg_keyboard = await message.reply_photo(
             thumbnail,
             caption=f"Видео: {title}\n\n {emoji.emojize(EMOJIS['tv'])} Выберите формат для скачивания:",
-            reply_markup=await main_kb(filtered_formats, audio_id, audio_size)
+            reply_markup=await main_kb(filtered_formats, audio_id, audio_size, video)
         )
 
         user_messages[user_id] = msg_keyboard.message_id
@@ -218,6 +229,7 @@ async def download_handler(callback_query: types.CallbackQuery, bot:Bot, state: 
     format_id = callback_query.data.split(':')[1]
     user_id = callback_query.from_user.id
     file_size_id = callback_query.data.split(':')[2]
+    video_id = int(callback_query.data.split(':')[3])
 
     # Устанавливаем состояние "downloading"
     await state.set_state(DownloadState.downloading)
@@ -247,6 +259,7 @@ async def download_handler(callback_query: types.CallbackQuery, bot:Bot, state: 
 
             # Скачивание видео
             output_file, video_info = await download_and_merge_by_format(db, user_id, format_id)
+            format_get = await get_info_id(video_id=video_id, format_id=format_id)
             if output_file == None:
                 await callback_query.message.reply(
                     text=emoji.emojize(EMOJIS['warning']) + "Данное видео скорее всего заблокировано в вашем регионе.",
@@ -296,28 +309,56 @@ async def download_handler(callback_query: types.CallbackQuery, bot:Bot, state: 
 
             # Отправка пользователю
             if callback_query.data.startswith('yt_audio'):
+                if user_id in user_messages:
+                    try:
+                        await bot.edit_message_caption(
+                            chat_id=callback_query.message.chat.id,
+                            message_id=user_messages[user_id],
+                            caption=emoji.emojize(EMOJIS['download']) + ' Отправляю аудио в телеграмм...',
+                            reply_markup=None
+                        )
+                        logging.info(
+                            f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
+                    except Exception as e:
+                        logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
                 audio_file = FSInputFile(output_file)
-                await callback_query.message.answer_audio(
+                give = await callback_query.message.answer_audio(
                     audio=audio_file,
                     caption=caption,
                     parse_mode=None,
                     supports_streaming=True
                 )
+                id_telegram = give.audio.file_id
                 logging.info(f"УСПЕХ: Аудио файл отправлен пользователю {user_id}: {output_file}")
             else:
                 try:
+                    if user_id in user_messages:
+                        try:
+                            await bot.edit_message_caption(
+                                chat_id=callback_query.message.chat.id,
+                                message_id=user_messages[user_id],
+                                caption=emoji.emojize(EMOJIS['download']) + ' Отправляю видео в телеграмм...',
+                                reply_markup=None
+                            )
+                            logging.info(
+                                f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
+                        except Exception as e:
+                            logging.warning(
+                                f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
                     video_file = FSInputFile(output_file)
-                    await callback_query.message.answer_video(
+                    give = await callback_query.message.answer_video(
                         video=video_file,
                         caption=caption,
                         parse_mode=None,
                         supports_streaming=True,
                         timeout=900
                     )
+                    id_telegram = give.video.file_id
                     logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
                 except Exception as e:
                     logging.error(f"ОШИБКА: файл не удалось ОТПРАВИТЬ {user_id}: {e}")
 
+            await create_file(video_id=video_id, format_id=format_get, id_telegram=id_telegram)
             if os.path.exists(output_file):
                 os.remove(output_file)
                 logging.info(f"УСПЕХ: Файл {output_file} УДАЛЕН! ")
@@ -565,6 +606,18 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
             )
             # Отправляем аудио
             if callback_query.data.split(':')[0] == 'vk_audio:' or output_file.endswith('.m4a'):
+                if user_id in user_messages:
+                    try:
+                        await bot.edit_message_caption(
+                            chat_id=callback_query.message.chat.id,
+                            message_id=user_messages[user_id],  # Используем ID сохраненного сообщения
+                            caption=emoji.emojize(EMOJIS['download']) + 'Загружаю аудио в телеграмм...',
+                            reply_markup=None  # Убираем клавиатуру
+                        )
+                        logging.info(
+                            f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
+                    except Exception as e:
+                        logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
                 audio_file = FSInputFile(output_file)
                 await callback_query.message.answer_audio(
                     audio=audio_file,
@@ -574,7 +627,18 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                 )
                 logging.info(f"УСПЕХ: Аудио файл отправлен пользователю {user_id}: {output_file}")
             else:
-                # Выгружаем видео в телеграмм
+                if user_id in user_messages:
+                    try:
+                        await bot.edit_message_caption(
+                            chat_id=callback_query.message.chat.id,
+                            message_id=user_messages[user_id],  # Используем ID сохраненного сообщения
+                            caption=emoji.emojize(EMOJIS['download']) + 'Загружаю видео в телеграмм...',
+                            reply_markup=None  # Убираем клавиатуру
+                        )
+                        logging.info(
+                            f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
+                    except Exception as e:
+                        logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
                 video_file = FSInputFile(output_file)
                 await callback_query.message.answer_video(
                     video=video_file,

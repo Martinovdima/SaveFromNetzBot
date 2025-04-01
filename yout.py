@@ -11,6 +11,7 @@ import json
 import os
 import re
 
+from database import create_info
 
 cookies_file = os.path.abspath("cookies.txt")
 
@@ -167,6 +168,8 @@ async def get_video_info(url):
 
         # Миниатюра
         thumbnail = info.get('thumbnail', '')
+        channel_id = info.get("channel_id", "ID не найден")
+        channel_name = info.get("channel", "Название не найдено")
 
         # Проверяем наличие аудиоформатов
         formats = info.get('formats', [])
@@ -182,10 +185,10 @@ async def get_video_info(url):
         # with open("video_info.json", "w", encoding="utf-8") as f:
         #     json.dump(info, f, indent=4, ensure_ascii=False)
 
-        return best_audio['format_id'], best_audio['filesize'], title, thumbnail, info, video_id
+        return best_audio['format_id'], best_audio['filesize'], title, thumbnail, info, video_id, channel_id, channel_name
 
 
-async def filter_best_formats(formats):
+async def filter_best_formats(formats, video_id):
     """
     Фильтрует список форматов, оставляя только один лучший формат на каждое разрешение.
     Убирает форматы без размера файла и без видеокодека.
@@ -212,7 +215,6 @@ async def filter_best_formats(formats):
                 "filesize": f"{round(filesize / (1024 ** 2), 2)} MB",
                 "tbr": bitrate
             }
-
     return list(best_formats.values())
 
 

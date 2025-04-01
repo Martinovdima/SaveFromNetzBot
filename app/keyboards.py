@@ -1,4 +1,5 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from rest import EMOJIS
 import emoji
 
@@ -14,17 +15,17 @@ def all_videos_channel(id_channel):
     ])
 
 
-async def main_kb(filtered_formats, audio_id, audio_size) -> InlineKeyboardMarkup:
+async def main_kb(filtered_formats, audio_id, audio_size, video) -> InlineKeyboardMarkup:
     button_list = []
     audio_full_size = f'{round(audio_size / (1024 ** 2), 2)} MB'
     button_list.append([InlineKeyboardButton(
         text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {audio_full_size}",
-        callback_data=f"yt_audio:{audio_id}:{audio_full_size}")])
+        callback_data=f"yt_audio:{audio_id}:{audio_full_size}:{video}")])
 
     for f in filtered_formats:
         format_id = f['format_id']
         if format_id:
-            callback_data = f"yt_video:{f['format_id']}:{f['filesize']}"
+            callback_data = f"yt_video:{f['format_id']}:{f['filesize']}:{video}"
             button_list.append([InlineKeyboardButton(
                 text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}",
                 callback_data=callback_data)])
