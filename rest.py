@@ -6,6 +6,14 @@ from urllib.parse import urlparse, parse_qs
 
 import logging
 
+async def convert_size_to_bytes(size_str: str) -> int:
+    if not size_str.endswith(" MB"):
+        raise ValueError("Неверный формат строки размера. Ожидался формат 'X.XX MB'.")
+
+    size_in_mb = float(size_str.replace(" MB", "").strip())  # Убираем "MB" и конвертируем в float
+    size_in_bytes = int(size_in_mb * (1024 ** 2))  # Переводим в байты
+    return size_in_bytes
+
 def is_playlist_url(url):
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
@@ -54,7 +62,8 @@ EMOJIS = {
     'tv': surrogates.decode('\U0001F4FA'),
     'warning': surrogates.decode('\u26A0'),
     'start': surrogates.decode('\U0001F4E5'),
-    'sound': surrogates.decode('\U0001f3b6')
+    'sound': surrogates.decode('\U0001f3b6'),
+    'fire': f'{surrogates.decode('\u26A1')} fast'
 }
 
 # Переменные для сообщений об ошибке

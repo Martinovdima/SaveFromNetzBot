@@ -2,16 +2,14 @@ from sqlalchemy.orm import Session
 from config import ffmpeg_path
 from rest import DOWNLOAD_DIR
 from yt_dlp import YoutubeDL
-from db import User
+
 
 import subprocess
 import asyncio
 import logging
-import json
 import os
 import re
 
-from database import create_info
 
 cookies_file = os.path.abspath("cookies.txt")
 
@@ -33,7 +31,7 @@ async def sanitize_filename(filename):
     return re.sub(r"\s+", " ", sanitized).strip()
 
 
-async def download_and_merge_by_format(db: Session, user_id: int, format_id: str) -> str:
+async def download_and_merge_by_format(video, format_id: str) -> str:
     """
     Скачивает видео и аудио по выбранному формату, объединяет их и возвращает путь к итоговому файлу.
 
@@ -48,14 +46,9 @@ async def download_and_merge_by_format(db: Session, user_id: int, format_id: str
 
     def sync_download():
         os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
-        # Получаем URL пользователя из базы данных
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user or not user.url:
-            raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
-
-        url = user.url
-        title = user.title
-        video_id = user.video_id
+        url = video.url
+        title = video.name
+        video_id = video.id
         # Настройки для скачивания видео и аудио
         ydl_opts = {
             'cookiefile': "cookies.txt",
@@ -83,13 +76,7 @@ async def download_and_merge_by_format(db: Session, user_id: int, format_id: str
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 resolution = info.get('resolution', 'unknown')
-                ext = info.get('ext', 'mkv')  # Если не найдено расширение, по умолчанию 'mkv'
-        # except utils.ExtractorError as e:
-        #     logging.info(f'__yout.py__79__ Video format problem')
-        #     return None, f'У видео проблема с форматами. Ошибка {e}'
-        # except utils.DownloadError as e:
-        #     logging.info(f'__yout.py__82__ Video download problem')
-        #     return None, f'У видео проблема с загрузкой. Ошибка {e}'
+                ext = info.get('ext', 'mp4')
         except Exception as e:
             logging.error(f"❌ Ошибка при скачивании видео: {e}", exc_info=True)  # <-- Выводим всю инфу об ошибке
             return None, f'Ошибка: {e}'

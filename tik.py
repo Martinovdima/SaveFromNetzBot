@@ -1,20 +1,11 @@
 from rest import DOWNLOAD_DIR, EMOJIS
-from sqlalchemy.orm import Session
 from yt_dlp import YoutubeDL
-from db import User
 import asyncio
 import emoji
 import os
 
 
-
-
-
-
-
-
-
-def get_tiktok_video_info(url):
+async def get_tiktok_video_info(url):
     ydl_opts = {
         'quiet': True,  # Отключает лишние логи
         'noplaylist': True,  # Загружает только одно видео
@@ -23,26 +14,21 @@ def get_tiktok_video_info(url):
 
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)  # Только получаем данные, без скачивания
+        video_id = info.get("id", "Неизвестно")
+        title = info.get("title", "Без названия")
+        author = (info.get("uploader") if info.get("uploader") != "Неизвестно" else info.get("uploader_id", "Неизвестно"))
+        channel_id = info.get("channel_id", "Неизвестно")
+        duration = info.get("duration", 0)
+        upload_date = info.get("upload_date", "Нет данных")
+        thumbnail_url = info.get("thumbnail", "Неизвестно")
 
-    video_id = info.get("id", "Неизвестно")
-    # 3. Получаем имя автора
-    author = info.get("uploader", "Неизвестно")
+    return info, video_id, title, author, channel_id, duration, upload_date, thumbnail_url
 
-    # 4. Получаем обложку видео (URL картинки)
-    thumbnail_url = info.get("thumbnail", "Неизвестно")
-
-    return info, author, thumbnail_url, video_id
-
-
-async def download_tiktok_video(db: Session, user_id: int, format_id):
+async def download_tiktok_video(video, format_id):
     def sync_download():
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user or not user.url:
-            raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
-
-        url = user.url
-        title = user.title
-        video_id = user.video_id
+        url = video.url
+        title = video.name
+        video_id = video.id
 
         ydl_opts = {
             'format': f'{format_id}+ba/best',  # Выбирает лучшее видео+аудио
@@ -65,8 +51,7 @@ async def download_tiktok_video(db: Session, user_id: int, format_id):
     # Запускаем синхронную загрузку в отдельном потоке
     return await asyncio.to_thread(sync_download)
 
-
-def get_tiktok_video_details(info):
+async def get_tiktok_video_details(info):
     """Возвращает список словарей с форматами видео, исключая дубликаты разрешений"""
 
     formats = {}
@@ -84,11 +69,11 @@ def get_tiktok_video_details(info):
                     formats[resolution] = (format_id, size_mb)
 
     # Преобразуем в список словарей
-    result = [{"id": fmt_id, "resolution": res, "size": size} for res, (fmt_id, size) in formats.items()]
+    result = [{"format_id": fmt_id, "resolution": res, "filesize": size} for res, (fmt_id, size) in formats.items()]
 
     return result
 
-def create_caption(video_info, format_id):
+async def create_caption(video_info, format_id):
     """Создает описание (caption) для видео, используя данные из video_info"""
     formatted_duration = video_info.get('duration', 0)
 

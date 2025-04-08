@@ -2,11 +2,21 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from rest import EMOJIS
 import emoji
+from database import get_status_by_id, get_info_id
+from aiogram import Bot
+from aiogram.types import BotCommand
 
 find_yt_kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🔍 Поиск на YouTube", switch_inline_query_current_chat="")]
 ])
 
+
+async def set_main_menu(bot: Bot):
+    commands = [
+        BotCommand(command="/start", description="Запустить бота"),
+        BotCommand(command="/search", description="Поиск по каналу"),
+    ]
+    await bot.set_my_commands(commands)
 
 def all_videos_channel(id_channel):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -17,17 +27,26 @@ def all_videos_channel(id_channel):
 
 async def main_kb(filtered_formats, audio_id, audio_size, video) -> InlineKeyboardMarkup:
     button_list = []
+    info_id = await get_info_id(video_id=video, format_id=audio_id)
+    status = await get_status_by_id(info_id)
+    fire_emoji = emoji.emojize(EMOJIS['fire']) if status else ""
     audio_full_size = f'{round(audio_size / (1024 ** 2), 2)} MB'
     button_list.append([InlineKeyboardButton(
-        text=f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {audio_full_size}",
+        text=(f" Cкачать {emoji.emojize(EMOJIS['sound'])} аудио {emoji.emojize(EMOJIS['size'])} {audio_full_size}"
+              f'{fire_emoji}'),
         callback_data=f"yt_audio:{audio_id}:{audio_full_size}:{video}")])
 
     for f in filtered_formats:
         format_id = f['format_id']
         if format_id:
+            fire_emoji = emoji.emojize(EMOJIS['fire']) if f.get('status') else ""
             callback_data = f"yt_video:{f['format_id']}:{f['filesize']}:{video}"
             button_list.append([InlineKeyboardButton(
-                text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']:<10} {emoji.emojize(EMOJIS['size'])}  {f['filesize']:<10}",
+                text=(
+                    f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} "
+                    f"{emoji.emojize(EMOJIS['size'])} {f['filesize']} "
+                    f"{fire_emoji}"
+                ),
                 callback_data=callback_data)])
 
     # Создаем клавиатуру с кнопками
@@ -35,55 +54,56 @@ async def main_kb(filtered_formats, audio_id, audio_size, video) -> InlineKeyboa
     return keyboard
 
 
-async def make_keyboard_vk(formats_dict, duration):
+async def make_keyboard_vk(formats, video_id):
     """
-        Создаёт клавиатуру с кнопками для скачивания аудио и видео из VK.
+    Создаёт клавиатуру с кнопками для скачивания аудио и видео из VK.
 
-        Args:
-            formats_dict (dict[int, list]): Словарь форматов, где ключ — номер формата,
-                                            значение — список с одним словарем (формат видео/аудио).
-            duration (int | None): Длительность видео в секундах или None, если неизвестно.
+    Args:
+        formats (list[dict]): Список форматов (каждый — словарь с format_id, resolution, filesize).
+        video_id (int): ID видео (используется в callback).
 
-        Returns:
-            InlineKeyboardMarkup: Объект клавиатуры с кнопками загрузки.
-        """
+    Returns:
+        InlineKeyboardMarkup: Клавиатура с кнопками загрузки.
+    """
     button_list = []
 
-    for num, format_list in formats_dict.items():
-        f = format_list[0]  # Достаём единственный элемент списка
+    for f in formats:
+        print(f)
+        # Пропускаем, если размер не указан или нулевой
+        if f['filesize'] in (0, '0', '0.0 MB'):
+            continue
 
-        resolution_text = "Аудио" if f.get(
-            "width") is None else f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}"
+        fire_emoji = emoji.emojize(EMOJIS['fire']) if f.get('status') else ""
+        res_icon = emoji.emojize(EMOJIS['sound'] if f['resolution'] == "Аудио" else EMOJIS['resolutions'])
 
-        # Проверяем, есть ли 'tbr' и 'duration'
-        if 'tbr' in f and isinstance(f['tbr'], (int, float)) and duration:
-            # Рассчитываем размер файла
-            file_size = (f['tbr'] * duration) / (8 * 1024)  # в МБ
-            size_text = f"{round(file_size, 2)} MB"
-        else:
-            # Если данных недостаточно, выводим "Неизвестно"
-            size_text = "Неизвестно"
+        button_text = (
+            f"Скачать {res_icon} {f['resolution']} "
+            f"{emoji.emojize(EMOJIS['size'])} {f['filesize']} {fire_emoji}"
+        )
 
-        # Определяем тип callback
-        callback_type = "vk_audio" if resolution_text == "Аудио" else "vk_video"
+        callback_type = "vk_audio" if f['resolution'] == "Аудио" else "vk_video"
 
         button_list.append([
             InlineKeyboardButton(
-                text=f"Скачать {emoji.emojize(EMOJIS['sound'] if resolution_text == 'Аудио' else EMOJIS['resolutions'])} {resolution_text} {emoji.emojize(EMOJIS['size'])} {size_text}",
-                callback_data=f"{callback_type}:{num}:{size_text}"  # Используем номер формата
+                text=button_text.strip(),
+                callback_data=f"{callback_type}:{await get_info_id(video_id=video_id, format_id=f['format_id'])}:{f['filesize']}:{video_id}"
             )
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=button_list)
 
 
-async def main_kb_tt(formats):
+async def main_kb_tt(formats, video):
     button_list = []
-
     for f in formats:
+        if f['filesize'] == 0:
+            continue
+        fire_emoji = emoji.emojize(EMOJIS['fire']) if f.get('status') else ""
         button_list.append([InlineKeyboardButton(
-            text=f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} {emoji.emojize(EMOJIS['size'])}  {f['size']}",
-            callback_data=f"tt_download:{f['id']}:{f['size']}")])
+            text=(f" Cкачать {emoji.emojize(EMOJIS['resolutions'])} {f['resolution']} "
+                  f"{emoji.emojize(EMOJIS['size'])} {f['filesize']}"
+                  f"{fire_emoji}"),
+                callback_data=f"tt_download:{f['format_id']}:{f['filesize']}:{video}")])
 
     # Создаем клавиатуру с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=button_list)

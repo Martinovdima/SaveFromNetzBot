@@ -1,116 +1,142 @@
 from yt_dlp import YoutubeDL
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import emoji
+from typing import Tuple, Optional
 import os
 import asyncio
 
 from sqlalchemy.orm import Session
-from db import User
-from rest import EMOJIS, DOWNLOAD_DIR
+from config import ffmpeg_path
+from rest import DOWNLOAD_DIR
 
 
-def get_vk_video_info(url):
+async def get_vk_video_info(url: str) -> Tuple[dict, str, str, str, Optional[int], str, str]:
     """
-        Получает информацию о видео с VK с помощью yt-dlp.
+    Получает информацию о видео с VK с помощью yt-dlp.
 
-        Args:
-            url (str): Ссылка на видео.
+    Args:
+        url (str): Ссылка на видео.
 
-        Returns:
-            tuple: Кортеж, содержащий:
-                - dict: Полная информация о видео.
-                - str: Автор видео.
-                - str: Ссылка на миниатюру (обложку).
-                - str: ID видео.
-                - int | None: Длительность видео в секундах или None, если не указано.
-        """
+    Returns:
+        tuple: Кортеж, содержащий:
+            - dict: Полная информация о видео.
+            - str: Автор видео.
+            - str: Ссылка на миниатюру (обложку).
+            - str: ID видео.
+            - int | None: Длительность видео в секундах или None, если не указано.
+            - str: ID канала (если есть).
+            - str: Дата загрузки в формате ГГГГММДД (если есть).
+    """
     ydl_opts = {
-        'quiet': True,  # Отключает лишние логи
-        'noplaylist': True,  # Загружает только одно видео
-        'extract_flat': False,  # Позволяет получить детали о видео
+        'quiet': True,
+        'noplaylist': True,
+        'extract_flat': False,
+        'force_generic_extractor': False,  # Важно для корректной работы с VK
     }
 
     with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)  # Только получаем данные, без скачивания
+        try:
+            info = ydl.extract_info(url, download=False)
+        except Exception as e:
+            raise RuntimeError(f"Не удалось получить информацию о видео: {e}")
+
+    duration = info.get('duration')
+    author = info.get('uploader', 'Неизвестно')
+    thumbnail_url = info.get('thumbnail', 'Нет обложки')
+    video_id = info.get('id', 'Неизвестно')
+    channel_id = info.get('uploader_id', 'Неизвестно')
+    upload_date = info.get('upload_date', 'Нет данных')
+
+    return info, author, thumbnail_url, video_id, duration, channel_id, upload_date
 
 
-    duration = info.get('duration', None)
-    duration = info.get('duration', None)
-    video_id = info.get("id", "Неизвестно")
-    author = info.get("uploader", "Неизвестно")
-    thumbnail_url = info.get("thumbnail", "Неизвестно")
-
-    return info, author, thumbnail_url, video_id, duration
-
-
-def get_formats_vk_video(video_info):
+async def get_formats_vk_video(video_info):
     """
-        Извлекает и фильтрует доступные форматы видео и аудио из информации о видео VK.
+    Возвращает список уникальных видео- и аудио-форматов с рассчитанным размером, если возможно.
 
-        Args:
-            video_info (dict): Словарь с информацией о видео, полученный из yt-dlp.
+    Args:
+        video_info (dict): Информация о видео, полученная через yt-dlp.
 
-        Returns:
-            dict[int, list]: Словарь форматов с номерами от 1, где:
-                - format_id (str): Уникальный идентификатор формата.
-                - ext (str): Расширение файла (например, "mp4").
-                - width (int | None): Ширина видео или None (если аудиофайл).
-                - height (int | None): Высота видео или None (если аудиофайл).
-                - filesize (int | str): Размер файла в байтах или "Неизвестно".
-                - tbr (float | str): Средний битрейт в кбит/с или "Неизвестно".
-        """
+    Returns:
+        List[Dict]: Список форматов. Каждый формат — словарь с ключами:
+            - format_id (str)
+            - resolution (str, например '640x360')
+            - filesize (str) — в МБ или "Неизвестно"
+    """
     formats = video_info.get("formats", [])
-    unique_resolutions = {}  # Словарь для хранения уникальных форматов
+    duration = video_info.get("duration")  # В секундах
+
+    result = []
+    seen_resolutions = set()
     best_audio = None
 
-    # Находим лучший аудиоформат (наибольший abr)
+    # Карта соответствия высоты к ширине (ориентировочно, можно расширять)
+    height_to_width = {
+        144: 256,
+        240: 426,
+        360: 640,
+        480: 854,
+        720: 1280,
+        1080: 1920,
+    }
+
+    # Найти лучший аудиоформат
     for f in formats:
-        if f.get("vcodec") == "none" and f.get("ext") == "m4a":  # Только аудио форматы M4A
-            f_abr = f.get("abr") or 0  # Если abr отсутствует, заменяем на 0
-            best_audio_abr = best_audio.get("abr", 0) if best_audio else 0
+        if f.get("vcodec") == "none" and f.get("ext") == "m4a":
+            if not best_audio or (f.get("abr", 0) > best_audio.get("abr", 0)):
+                best_audio = f
 
-            if best_audio is None or f_abr > best_audio_abr:
-                best_audio = f  # Запоминаем лучший аудиоформат
-
-    # Обрабатываем видео-форматы, уникализируя их по `resolution`
-    for f in formats:
-        if f.get("vcodec") != "none" and f.get('width') != None:  # Исключаем аудио
-            resolution = f.get("resolution", f"{f.get('width', 'Неизвестно')}x{f.get('height', 'Неизвестно')}")
-
-            if resolution not in unique_resolutions:  # Уникализируем по разрешению
-                unique_resolutions[resolution] = {
-                    "format_id": f.get("format_id", "Неизвестно"),
-                    "ext": f.get("ext", "Неизвестно"),
-                    "width": f.get("width"),
-                    "height": f.get("height"),
-                    "filesize": f.get("filesize") or "Неизвестно",
-                    "tbr": f.get("tbr") or "Неизвестно"
-                }
-
-    # Формируем итоговый список с нумерацией
-    result = {}
-    index = 1
-
-    # Добавляем лучший аудиоформат (если найден)
     if best_audio:
-        result[index] = [{
-            "format_id": best_audio.get("format_id", "Неизвестно"),
-            "ext": best_audio.get("ext", "Неизвестно"),
-            "width": None,
-            "height": None,
-            "filesize": best_audio.get("filesize") or "Неизвестно",
-            "tbr": best_audio.get("tbr") or "Неизвестно"
-        }]
-        index += 1
+        tbr = best_audio.get("tbr")
+        file_size = (tbr * duration) / (8 * 1024) if tbr and duration else None
+        size_text = f"{round(file_size, 2)} MB" if file_size else "Неизвестно"
 
-    # Добавляем видео-форматы
-    for video_format in unique_resolutions.values():
-        result[index] = [video_format]
-        index += 1
+        result.append({
+            "format_id": best_audio.get("format_id", "Неизвестно"),
+            "resolution": "audio",
+            "filesize": size_text
+        })
+
+    # Обработка видеоформатов
+    for f in formats:
+        if f.get("vcodec") != "none":
+            width = f.get("width")
+            height = f.get("height")
+
+            # Приоритет: width + height -> resolution (360p и т.п.) -> пропустить
+            if width and height:
+                resolution = f"{width}x{height}"
+            elif f.get("resolution") and 'p' in f.get("resolution"):
+                try:
+                    res_height = int(f["resolution"].replace("p", ""))
+                    inferred_width = height_to_width.get(res_height, None)
+                    if inferred_width:
+                        resolution = f"{inferred_width}x{res_height}"
+                    else:
+                        continue  # Неизвестное разрешение — пропускаем
+                except ValueError:
+                    continue
+            else:
+                continue  # Никакой инфы — пропускаем
+
+            if resolution in seen_resolutions:
+                continue
+            seen_resolutions.add(resolution)
+
+            file_size = f.get("filesize")
+            if not file_size and f.get("tbr") and duration:
+                file_size = (f["tbr"] * duration) / (8 * 1024)  # в МБ
+
+            size_text = f"{round(file_size, 2)} MB" if isinstance(file_size, (int, float)) else "Неизвестно"
+
+            result.append({
+                "format_id": f.get("format_id", "Неизвестно"),
+                "resolution": resolution,
+                "filesize": size_text
+            })
+
     return result
 
 
-async def download_vk_video_async(db: Session, user_id: int, format_id):
+async def download_vk_video_async(video, format_id):
     """
     Асинхронно загружает видео с VK с помощью yt-dlp.
 
@@ -127,17 +153,12 @@ async def download_vk_video_async(db: Session, user_id: int, format_id):
     """
 
     def sync_download():
-        ffmpeg_path = os.path.abspath("/usr/bin/ffmpeg")
+        ffmpeg_path = os.path.abspath("ffmpeg/bin/ffmpeg.exe")
         os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_path)
-        """Синхронная функция для скачивания видео (запускается в отдельном потоке)."""
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user or not user.url:
-            raise ValueError("Ссылка не найдена в базе данных. Отправьте её ещё раз.")
+        url = video.url
+        title = video.name
+        video_id = video.id
 
-
-        url = user.url
-        title = user.title
-        video_id = user.video_id
 
         ydl_opts = {
             'format': f'{format_id}+ba/best',
@@ -167,24 +188,4 @@ async def download_vk_video_async(db: Session, user_id: int, format_id):
     # Запускаем синхронную загрузку в отдельном потоке
     return await asyncio.to_thread(sync_download)
 
-def get_format_id_from_callback(callback_data, formats_dict):
-    """
-    Получает format_id из callback_data, используя словарь форматов.
 
-    Args:
-        callback_data (str): Данные callback в формате "vk_audio:номер:размер".
-        formats_dict (dict[int, list]): Словарь форматов, где ключ — номер формата.
-
-    Returns:
-        str: format_id соответствующего формата или "Неизвестно", если не найден.
-    """
-    try:
-        format_number = int(callback_data.split(":")[1])  # Извлекаем номер формата
-        format_info = formats_dict.get(format_number)  # Получаем список с инфо
-
-        if format_info:
-            return format_info[0].get("format_id", "Неизвестно")  # Возвращаем format_id
-    except (IndexError, ValueError):
-        pass  # Если callback_data невалидный, просто возвращаем "Неизвестно"
-
-    return "Неизвестно"
