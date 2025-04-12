@@ -2,6 +2,7 @@ from yt_dlp import YoutubeDL
 from typing import Tuple, Optional
 import os
 import asyncio
+import re
 
 from sqlalchemy.orm import Session
 from config import ffmpeg_path
@@ -10,31 +11,39 @@ from rest import DOWNLOAD_DIR
 
 async def get_vk_video_info(url: str) -> Tuple[dict, str, str, str, Optional[int], str, str]:
     """
-    Получает информацию о видео с VK с помощью yt-dlp.
-
-    Args:
-        url (str): Ссылка на видео.
-
-    Returns:
-        tuple: Кортеж, содержащий:
-            - dict: Полная информация о видео.
-            - str: Автор видео.
-            - str: Ссылка на миниатюру (обложку).
-            - str: ID видео.
-            - int | None: Длительность видео в секундах или None, если не указано.
-            - str: ID канала (если есть).
-            - str: Дата загрузки в формате ГГГГММДД (если есть).
+    Возвращает инфу о конкретном видео VK, даже если это ссылка на плейлист.
     """
     ydl_opts = {
         'quiet': True,
-        'noplaylist': True,
+        'noplaylist': False,
         'extract_flat': False,
-        'force_generic_extractor': False,  # Важно для корректной работы с VK
+        'force_generic_extractor': False,
     }
+
+    # Извлекаем ID видео из URL (например: video-123_456)
+    match = re.search(r'video(-?\d+_\d+)', url)
+    target_video_id = match.group(1) if match else None
 
     with YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
+
+            # Если это плейлист — ищем нужное видео
+            if info.get('_type') == 'playlist':
+                entries = info.get('entries', [])
+                if not entries:
+                    raise ValueError("Плейлист пуст")
+
+                # Ищем по ID
+                if target_video_id:
+                    for entry in entries:
+                        if entry.get('id') == target_video_id:
+                            info = entry
+                            break
+                    else:
+                        raise ValueError(f"Видео с ID {target_video_id} не найдено в плейлисте")
+                else:
+                    info = entries[0]  # запасной вариант
         except Exception as e:
             raise RuntimeError(f"Не удалось получить информацию о видео: {e}")
 

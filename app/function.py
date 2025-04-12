@@ -1,7 +1,10 @@
 from aiogram.types import InlineQueryResultArticle, InlineQueryResultVideo, InputTextMessageContent
 from googleapiclient.discovery import build
 from config import YOUTUBE_API_KEY
-
+from sqlalchemy import select, func
+from datetime import datetime, timedelta
+from database import AsyncSessionLocal  # или свой путь
+from data.models import User
 
 
 # Инициализация API клиента
@@ -193,3 +196,20 @@ async def format_number(value: int) -> str:
     elif value >= 1_000:
         return f"{value / 1_000:.1f} тыс"
     return str(value)
+
+async def get_user_statistics():
+    async with AsyncSessionLocal() as session:
+        # Общее количество пользователей
+        total_query = await session.execute(select(func.count()).select_from(User))
+        total_users = total_query.scalar()
+
+        # Дата 24 часа назад
+        day_ago = datetime.utcnow() - timedelta(days=1)
+
+        # Количество активных за последние 24 часа
+        active_query = await session.execute(
+            select(func.count()).select_from(User).where(User.last_enter_date >= day_ago)
+        )
+        active_users = active_query.scalar()
+
+        return total_users, active_users

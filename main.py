@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from app.handlers import router
 from config import session
 from aiogram.fsm.storage.memory import MemoryStorage
+from database import init_db
 from app.keyboards import set_main_menu
 
 
@@ -25,6 +26,7 @@ dp.include_router(router)
 async def main():
     print("Проверка: скрипт запустился!")
     try:
+        await init_db()
         await set_main_menu(bot)
         await dp.start_polling(bot, skip_updates=True, polling_timeout=120)
     except Exception as e:

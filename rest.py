@@ -77,7 +77,7 @@ ERROR_TEXT = f"Что-то пошло не так, попробуйте позж
 YOUTUBE_REGEX = r"(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w\-]+"
 YOUTUBE_CHANNEL_REGEX = r"(?:https?:\/\/)?(?:www\.)?youtube\.com\/(channel|c|user)\/[a-zA-Z0-9_-]+"
 TIKTOK_REGEX = r"(https?:\/\/)?(www\.)?(tiktok\.com)\/\S+"
-VK_VIDEO_REGEX = r"(https?://)?(www\.)?(vk\.com|vkvideo\.ru)/video[-\d]+_\d+"
+VK_VIDEO_REGEX = r"(https?://)?(www\.)?(vk\.com|vkvideo\.ru)/(video[-\d_]+|playlist/[-\d_]+/video[-\d_]+)"
 
 INFO_MESSAGE = " Получаю информацию о видео..."
 DOWNLOAD_DIR = make_a_folders()

@@ -5,14 +5,13 @@ from yout import sanitize_filename, get_video_info, filter_best_formats, convert
                                                               download_and_merge_by_format
 from vk import get_vk_video_info, get_formats_vk_video, download_vk_video_async
 from tik import get_tiktok_video_info, download_tiktok_video, get_tiktok_video_details, create_caption
-from app.keyboards import main_kb, make_keyboard_vk, main_kb_tt, find_yt_kb, all_videos_channel
-from db import get_db, update_or_create_user, count_users
+from app.keyboards import main_kb, make_keyboard_vk, main_kb_tt, find_yt_kb, all_videos_channel, main_menu
 from app.states import DownloadState
-from aiogram import Router, Bot, types, exceptions
+from aiogram import Router, Bot, types, exceptions, F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
-from app.function import search_youtube, get_channel_info, get_channel_videos
-from aiogram.types import FSInputFile, InlineQuery
+from app.function import search_youtube, get_channel_info, get_channel_videos, get_user_statistics
+from aiogram.types import FSInputFile, Message
 from aiogram.filters import Command
 from datetime import datetime
 from aiogram.types import InlineQueryResultVideo, InputTextMessageContent
@@ -26,10 +25,14 @@ import sys
 import re
 import os
 
+from data.channels_func import create_or_update_channel
+from data.files_func import create_file, get_telegram_id_by_format_id
+from data.infos_func import create_info, get_info_id, update_info_status, get_audio_info, get_info_by_video_and_format, get_status_by_id, get_format_id_by_id, get_formats_by_video_id, get_video_formats
 
-from database import create_user, create_channel, create_video, create_info, create_file, get_info_id, update_info_status
-from database import get_video_by_url, is_video_in_db, get_audio_info, get_video_formats, get_video, update_video_thumbnail, get_info_by_video_and_format
-from database import get_status_by_id, get_telegram_id_by_format_id, get_info_by_video_id, get_format_id_by_id, get_formats_by_video_id
+from data.users_func import create_user, get_user, increment_yt_count, increment_vk_count, increment_tt_count
+from data.videos_func import create_video, get_video_by_url, is_video_in_db, get_video, update_video_thumbnail
+
+
 
 router = Router()
 
@@ -47,15 +50,47 @@ async def block_messages(message: types.Message):
 @router.message(CommandStart())
 async def start_handler(message: types.Message):
     await message.answer_photo(photo=START_IMAGE, caption="Просто отправьте ссылку на видео YouTube, VK или Tik Tok, и\
-                                я предоставлю варианты для скачивания!", reply_markup=find_yt_kb)
+                                я предоставлю варианты для скачивания!", reply_markup=main_menu)
 @router.message(Command("search"))
 async def search_command_handler(message: types.Message):
     await message.answer("Нажмите на кнопку ниже для поиска на YouTube:", reply_markup=find_yt_kb)
 
+@router.message(F.text == "🔁 Перезапустить")
+async def restart(message: Message):
+    await start_handler(message)
+
+@router.message(F.text == "🔍 Поиск")
+async def search(message: Message):
+    await message.answer(
+        "Нажмите кнопку ниже, чтобы искать в инлайн-режиме:",
+        reply_markup=find_yt_kb
+    )
+
+@router.message(F.text == "👤 Профиль")
+async def profile(message: Message):
+    user_id = message.from_user.id
+    user = await get_user(user_id)
+    days = (datetime.utcnow() - user.login_time).days
+    msg = f"👋 Привет, {user.username or 'пользователь'}!\n"
+    msg += f"🗓 Ты пользуешься нашим ресурсом уже {days} дней.\n"
+
+    if user.yt_count:
+        msg += f"📺 Ты скачивал {user.yt_count} раз с YouTube.\n"
+    if user.tt_count:
+        msg += f"🎵 Ты скачивал {user.tt_count} раз с TikTok.\n"
+    if user.vk_count:
+        msg += f"🎬 Ты скачивал {user.vk_count} раз с VK Видео.\n"
+
+    await message.answer(msg)
+
+@router.message(F.text == "ℹ️ Справка")
+async def help_info(message: Message):
+    await message.answer("ℹ️ Я могу искать видео, скачивать его и показывать ваш профиль.")
 
 @router.message(Command("admin"))
 async def admin_handler(message: types.Message):
-    await message.answer(text=f'Всего пользователей в базе')
+    total, active = await get_user_statistics()
+    await message.answer(f"👥 Всего пользователей: {total}\n🕒 Активных за 24 часа: {active}")
 
 
 @router.message(lambda message: re.search(YOUTUBE_CHANNEL_REGEX, message.text, re.IGNORECASE))
@@ -69,16 +104,19 @@ async def youtube_channel_handler(message: types.Message, state: FSMContext, bot
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
     channel_id, channel_name, channel_avatar, subscribers_count, video_count = await get_channel_info(url)
-    print(channel_id)
 
     all_videos_channel_kb = all_videos_channel(channel_id)
-    print(all_videos_channel_kb)
-    await message.reply_photo(
+    give = await message.reply_photo(
         channel_avatar,
         caption=f"{emoji.emojize(EMOJIS['tv'])} {channel_name}\n\n {emoji.emojize(EMOJIS['autor'])} Подписчики: {subscribers_count}\
                                                                 \n {emoji.emojize(EMOJIS['resolutions'])} Видео: {video_count}",
         reply_markup=all_videos_channel_kb
     )
+    file_id = give.photo[-1].file_id  # Обычно последний — самый большой по качеству
+    await create_or_update_channel(channel_id=str(channel_id), channel_name=channel_name,
+                                   channel_avatar=file_id, subscribers_count=subscribers_count, video_count=video_count
+                                   )
+
 
 
 @router.message(lambda message: re.search(YOUTUBE_REGEX, message.text, re.IGNORECASE))
@@ -114,7 +152,7 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
         else:
             audio_id, audio_size, title, thumbnail, info, video_id, channel_id, channel_name = await get_video_info(url)
             title_sanitaze = await sanitize_filename(title)
-            channel = await create_channel(channel_id, channel_name)
+            channel = await create_or_update_channel(channel_id=channel_id, channel_name=channel_name, channel_avatar=None, subscribers_count=None, video_count=None)
             video = await create_video(youtube_id=video_id, name=title_sanitaze, author=channel_name, url=url, channel_id=channel, time=info.get("duration"), date=info.get("upload_date"))
             new = True
 
@@ -169,28 +207,19 @@ async def tiktok_handler(message: types.Message, bot: Bot):
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
         user = await create_user(telegram_id=user_id, username=username, api=username)
         if await is_video_in_db(url):
-            print(f'Старый файл')
             videofile = await get_video_by_url(url)
-            print(f'Видеофайл нашел {videofile}')
             video = videofile.id
-            print(f'Видео id нашел {video}')
             title = videofile.name
-            print(f'Название нашел {title}')
             thumbnail = videofile.thumbnail
-            print(f'Картинка нашел {thumbnail}')
             format_id = await get_video_formats(video)
-            print(f'Формат нашел {format_id}')
             new = False
         else:
-            print(f'Новый файл')
             info, video_id, title_, author, channel_id, duration, upload_date, thumbnail_url = await get_tiktok_video_info(url)
-            print(f'Инфу выдал {info}')
             format_id = await get_tiktok_video_details(info)
-            print(f'Видео формат для нового видео {format_id}')
             title = await sanitize_filename(title_)
             thumbnail = thumbnail_url
 
-            channel = await create_channel(channel_id=channel_id, channel_name=author)
+            channel = await create_or_update_channel(channel_id=channel_id, channel_name=author, channel_avatar=None, subscribers_count=None, video_count=None)
             video = await create_video(youtube_id=video_id, name=title, author=author, url=url,
                                    channel_id=channel_id, time=duration, date=upload_date)
             new = True
@@ -236,32 +265,23 @@ async def vk_video_handler(message: types.Message, state: FSMContext, bot: Bot):
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
         user = await create_user(telegram_id=user_id, username=username, api=username)
         if await is_video_in_db(url):
-            print(f'Старый файл')
             videofile = await get_video_by_url(url)
-            print(f'Видеофайл нашел {videofile}')
             video = videofile.id
-            print(f'Видео id нашел {video}')
             title = videofile.name
-            print(f'Название нашел {title}')
             thumbnail = videofile.thumbnail
-            print(f'Картинка нашел {thumbnail}')
             format_id = await get_formats_by_video_id(video)
-            print(f'Формат нашел {format_id}')
             new = False
         else:
-            print(f'Новый файл')
             video_vk_info, author, thumbnail, video_id, duration, channel_id, upload_date = await get_vk_video_info(url)
-            print(f'Инфу выдал {video_vk_info}')
+            print(video_vk_info)
             format_id = await get_formats_vk_video(video_vk_info)
-            print(f'Видео формат для нового видео {format_id}')
             title = await sanitize_filename(video_vk_info['title'])
 
-            channel = await create_channel(channel_id=channel_id, channel_name=author)
+            channel = await create_or_update_channel(channel_id=channel_id, channel_name=author, channel_avatar=None, subscribers_count=None, video_count=None)
             video = await create_video(youtube_id=video_id, name=title, author=author, url=url,
                                    channel_id=channel_id, time=duration, date=upload_date)
             new = True
             for f in format_id:
-                print(f)
                 if f['resolution'] == 'audio':
                     type = 'Audio'
                 else:
@@ -438,8 +458,9 @@ async def download_handler(callback_query: types.CallbackQuery, bot:Bot, state: 
                     except Exception as e:
                         logging.error(f"ОШИБКА: файл не удалось ОТПРАВИТЬ {user_id}: {e}")
 
-                await create_file(video_id=video_id, format_id=format_get, id_telegram=id_telegram)
-                await update_info_status(id=format_get)
+                file_id = await create_file(video_id=video_id, format_id=format_get, id_telegram=id_telegram)
+                info = await update_info_status(id=format_get)
+                await increment_yt_count(user_id)
                 if os.path.exists(output_file):
                     os.remove(output_file)
                     logging.info(f"УСПЕХ: Файл {output_file} УДАЛЕН! ")
@@ -615,8 +636,9 @@ async def tt_download_handler(callback_query: types.CallbackQuery, bot: Bot, sta
                 id_telegram = give.video.file_id
                 logging.info(f"УСПЕХ: Видео файл отправлен пользователю {user_id}: {output_file}")
 
-                await create_file(video_id=video_id, format_id=format_get, id_telegram=id_telegram)
-                await update_info_status(id=format_get)
+                file_id = await create_file(video_id=video_id, format_id=format_get, id_telegram=id_telegram)
+                info = await update_info_status(id=format_get)
+                await increment_tt_count(user_id)
                 if os.path.exists(output_file):
                     os.remove(output_file)
                     logging.info(f"Файл{output_file} УДАЛЕН!")
@@ -749,8 +771,6 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                     logging.info(f"Файл {output_file} УДАЛЕН! ")
                     return
                 info = await get_info_by_video_and_format(video_id=video_id, format_id=format_id)
-                print('****************************************  INFO GET **************')
-                print(f'{info}')
 
 
                 # Формируем caption
@@ -782,7 +802,7 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                                 reply_markup=None  # Убираем клавиатуру
                             )
                             logging.info(
-                                f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
+                                f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}")
                         except Exception as e:
                             logging.warning(f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
                     audio_file = FSInputFile(output_file)
@@ -805,7 +825,7 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                                     reply_markup=None
                                 )
                                 logging.info(
-                                    f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}, скачивание началось")
+                                    f"УСПЕХ: Сообщение с клавиатурой скрыто у пользователя {user_id}")
                             except Exception as e:
                                 logging.warning(
                                     f"ОШИБКА: Произошла ошибка при попытке сокрытия клавиатуры у {user_id}: {e}")
@@ -822,9 +842,9 @@ async def vk_download_handler(callback_query: types.CallbackQuery, state: FSMCon
                     except Exception as e:
                         logging.error(f"ОШИБКА: файл не удалось ОТПРАВИТЬ {user_id}: {e}")
 
-                print(f'video_id{video_id}, format_id={format_id}, id_telegram={id_telegram}')
-                await create_file(video_id=video_id, format_id=int(callback_query.data.split(':')[1]), id_telegram=id_telegram)
-                await update_info_status(id=info.id)
+                file_id = await create_file(video_id=video_id, format_id=int(callback_query.data.split(':')[1]), id_telegram=id_telegram)
+                info = await update_info_status(id=info.id)
+                await increment_vk_count(user_id)
 
                 if os.path.exists(output_file):
                     os.remove(output_file)

@@ -2,14 +2,30 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from rest import EMOJIS
 import emoji
-from database import get_status_by_id, get_info_id
+from data.infos_func import get_status_by_id, get_info_id
 from aiogram import Bot
 from aiogram.types import BotCommand
+
 
 find_yt_kb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🔍 Поиск на YouTube", switch_inline_query_current_chat="")]
 ])
 
+main_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="🔁 Перезапустить"),
+            KeyboardButton(text="🔍 Поиск"),
+        ],
+        [
+            KeyboardButton(text="👤 Профиль"),
+            KeyboardButton(text="ℹ️ Справка")
+        ]
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=False,
+    input_field_placeholder="Выберите действие..."
+)
 
 async def set_main_menu(bot: Bot):
     commands = [
