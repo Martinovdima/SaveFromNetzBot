@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from app.handlers import router
 from config import session
 from aiogram.fsm.storage.memory import MemoryStorage
-from database import init_db
+from data.models import init_db
 from app.keyboards import set_main_menu
 
 

@@ -2,6 +2,7 @@ from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
+from database import engine  # Где создан SQLAlchemy engine
 
 Base = declarative_base()
 
@@ -17,6 +18,7 @@ class User(Base):
     tt_count = Column(BigInteger, nullable=True)
     vk_count = Column(BigInteger, nullable=True)
     subscribes_count = Column(BigInteger, nullable=True)
+    status_api = Column(Boolean, default=False)
     login_time = Column(DateTime, default=datetime.utcnow)
     last_enter_date = Column(DateTime, default=datetime.utcnow)
 
@@ -101,3 +103,7 @@ class File(Base):
     playlist = relationship("Playlist", back_populates="files")
     video = relationship("Video", back_populates="files")
     info = relationship("Info", back_populates="files")
+
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)

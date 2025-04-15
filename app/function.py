@@ -3,14 +3,33 @@ from googleapiclient.discovery import build
 from config import YOUTUBE_API_KEY
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
-from database import AsyncSessionLocal  # или свой путь
+from database import AsyncSessionLocal
 from data.models import User
-
+from aiogram.types import BufferedInputFile
+import requests
+from PIL import Image
+from io import BytesIO
 
 # Инициализация API клиента
-api_key =  YOUTUBE_API_KEY
+api_key = YOUTUBE_API_KEY
 youtube = build("youtube", "v3", developerKey=api_key)
 
+
+async def prepare_image_for_telegram(url: str) -> BufferedInputFile:
+    response = requests.get(url)
+    content_type = response.headers.get("Content-Type", "")
+
+    image_bytes = BytesIO(response.content)
+
+    if "webp" in content_type or url.endswith(".webp"):
+        image = Image.open(image_bytes).convert("RGB")
+        output = BytesIO()
+        image.save(output, format="JPEG")
+        output.seek(0)
+        return BufferedInputFile(output.read(), filename="converted.jpg")
+    else:
+        image_bytes.seek(0)
+        return BufferedInputFile(image_bytes.read(), filename="original.jpg")
 
 async def search_youtube(query, offset=""):
     try:

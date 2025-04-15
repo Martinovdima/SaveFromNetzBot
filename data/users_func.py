@@ -3,7 +3,7 @@ from database import AsyncSessionLocal
 from sqlalchemy.future import select
 from datetime import datetime
 
-async def create_user(telegram_id: int, username: str, api: str):
+async def create_user(telegram_id: int, username: str):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             # Проверяем, есть ли уже пользователь с таким telegram_id
@@ -22,7 +22,6 @@ async def create_user(telegram_id: int, username: str, api: str):
                 new_entry = User(
                     telegram_id=telegram_id,
                     username=username,
-                    api=api,
                     login_time=datetime.utcnow(),
                     last_enter_date=datetime.utcnow()
                 )

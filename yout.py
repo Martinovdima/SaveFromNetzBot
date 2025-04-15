@@ -155,6 +155,8 @@ async def get_video_info(url):
 
         # Миниатюра
         thumbnail = info.get('thumbnail', '')
+        print(thumbnail)
+        print(type(thumbnail))
         channel_id = info.get("channel_id", "ID не найден")
         channel_name = info.get("channel", "Название не найдено")
 

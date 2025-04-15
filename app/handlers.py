@@ -10,7 +10,7 @@ from app.states import DownloadState
 from aiogram import Router, Bot, types, exceptions, F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
-from app.function import search_youtube, get_channel_info, get_channel_videos, get_user_statistics
+from app.function import search_youtube, get_channel_info, get_channel_videos, get_user_statistics, prepare_image_for_telegram
 from aiogram.types import FSInputFile, Message
 from aiogram.filters import Command
 from datetime import datetime
@@ -138,7 +138,7 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
 
-        user = await create_user(telegram_id=user_id, username=username, api=username)
+        user = await create_user(telegram_id=user_id, username=username)
 
         if await is_video_in_db(url):
             videofile = await get_video_by_url(url)
@@ -150,8 +150,9 @@ async def youtube_handler(message: types.Message, state: FSMContext, bot: Bot):
             filtered_formats = await get_video_formats(videofile.id)
             new = False
         else:
-            audio_id, audio_size, title, thumbnail, info, video_id, channel_id, channel_name = await get_video_info(url)
+            audio_id, audio_size, title, image, info, video_id, channel_id, channel_name = await get_video_info(url)
             title_sanitaze = await sanitize_filename(title)
+            thumbnail = await prepare_image_for_telegram(image)
             channel = await create_or_update_channel(channel_id=channel_id, channel_name=channel_name, channel_avatar=None, subscribers_count=None, video_count=None)
             video = await create_video(youtube_id=video_id, name=title_sanitaze, author=channel_name, url=url, channel_id=channel, time=info.get("duration"), date=info.get("upload_date"))
             new = True
@@ -205,7 +206,7 @@ async def tiktok_handler(message: types.Message, bot: Bot):
 
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
-        user = await create_user(telegram_id=user_id, username=username, api=username)
+        user = await create_user(telegram_id=user_id, username=username)
         if await is_video_in_db(url):
             videofile = await get_video_by_url(url)
             video = videofile.id
@@ -217,7 +218,7 @@ async def tiktok_handler(message: types.Message, bot: Bot):
             info, video_id, title_, author, channel_id, duration, upload_date, thumbnail_url = await get_tiktok_video_info(url)
             format_id = await get_tiktok_video_details(info)
             title = await sanitize_filename(title_)
-            thumbnail = thumbnail_url
+            thumbnail = await prepare_image_for_telegram(thumbnail_url)
 
             channel = await create_or_update_channel(channel_id=channel_id, channel_name=author, channel_avatar=None, subscribers_count=None, video_count=None)
             video = await create_video(youtube_id=video_id, name=title, author=author, url=url,
@@ -263,7 +264,7 @@ async def vk_video_handler(message: types.Message, state: FSMContext, bot: Bot):
 
     try:
         msg_info = await message.reply_photo(photo=LOAD_IMAGE, caption=emoji.emojize(EMOJIS['wait']) + INFO_MESSAGE)
-        user = await create_user(telegram_id=user_id, username=username, api=username)
+        user = await create_user(telegram_id=user_id, username=username)
         if await is_video_in_db(url):
             videofile = await get_video_by_url(url)
             video = videofile.id
@@ -272,10 +273,11 @@ async def vk_video_handler(message: types.Message, state: FSMContext, bot: Bot):
             format_id = await get_formats_by_video_id(video)
             new = False
         else:
-            video_vk_info, author, thumbnail, video_id, duration, channel_id, upload_date = await get_vk_video_info(url)
+            video_vk_info, author, image, video_id, duration, channel_id, upload_date = await get_vk_video_info(url)
             print(video_vk_info)
             format_id = await get_formats_vk_video(video_vk_info)
             title = await sanitize_filename(video_vk_info['title'])
+            thumbnail = await prepare_image_for_telegram(image)
 
             channel = await create_or_update_channel(channel_id=channel_id, channel_name=author, channel_avatar=None, subscribers_count=None, video_count=None)
             video = await create_video(youtube_id=video_id, name=title, author=author, url=url,
@@ -315,10 +317,12 @@ async def vk_video_handler(message: types.Message, state: FSMContext, bot: Bot):
 @router.message()  # Этот хэндлер сработает, если ни один другой не подошёл
 async def handle_invalid_message(message: types.Message, bot: Bot):
     user_id = message.from_user.id
+    username = message.from_user.username
     if delete_keyboard_message(user_id):
         await bot.delete_message(chat_id=user_id, message_id=user_messages[user_id])
         del user_messages[user_id]
     logging.info(f"Сообщение в неправильном формате получено от пользователя {user_id} ***FAILED_LINK***")
+    user = await create_user(telegram_id=user_id, username=username)
     await message.answer_photo(photo=FAILS_IMAGE, caption="❌ Неправильный формат ссылки. Отправьте корректную ссылку на видео.")
 
 
